@@ -1,0 +1,29 @@
+name: NiyoraCompanion
+options:
+  bundleIdPrefix: com.niyora
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "5.0"
+    GENERATE_INFOPLIST_FILE: "YES"
+    # Shown in the HealthKit permission sheet. Honest about what and why.
+    INFOPLIST_KEY_NSHealthShareUsageDescription: "Niyora reads your Heart Rate Variability to show whether your breathing sessions help you relax. This data stays on your devices and is never uploaded."
+targets:
+  NiyoraCompanion:
+    type: application
+    platform: iOS
+    sources:
+      - path: NiyoraCompanion
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.niyora.companion
+        CODE_SIGN_ENTITLEMENTS: NiyoraCompanion/NiyoraCompanion.entitlements
+        CODE_SIGN_STYLE: Automatic
+        TARGETED_DEVICE_FAMILY: "1"
+        # Fill this in with your Apple Developer team ID (Xcode > Settings >
+        # Accounts, or the membership page). Without it, signing fails.
+        # DEVELOPMENT_TEAM: XXXXXXXXXX
