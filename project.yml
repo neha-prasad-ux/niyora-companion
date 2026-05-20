@@ -12,6 +12,12 @@ settings:
     GENERATE_INFOPLIST_FILE: "YES"
     # Shown in the HealthKit permission sheet. Honest about what and why.
     INFOPLIST_KEY_NSHealthShareUsageDescription: "Niyora reads your Heart Rate Variability to show whether your breathing sessions help you relax. This data stays on your devices and is never uploaded."
+    # Shown when the app first scans the pairing QR. Camera is used only
+    # to read the QR ‑ no photos are taken, no video is recorded.
+    INFOPLIST_KEY_NSCameraUsageDescription: "Niyora Companion scans the pairing QR on your Mac. The camera is used only for that scan."
+    # Shown when the app first opens a TCP connection to your Mac. iOS
+    # requires this for any peer connection on the LAN.
+    INFOPLIST_KEY_NSLocalNetworkUsageDescription: "Niyora Companion connects to Niyora on your Mac over your local wifi. No data is uploaded; the connection stays on your home network."
 targets:
   NiyoraCompanion:
     type: application
