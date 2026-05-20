@@ -50,6 +50,12 @@ struct ContentView: View {
 
     @ViewBuilder
     private var mainContent: some View {
+        // Touch flow.state so the @Observable dependency is registered
+        // on this view. Without this, a fresh scan completes the wire
+        // handshake (Mac flips to paired, KnownServerStore is upserted)
+        // but introState stays on screen, because KnownServerStore.all()
+        // is a plain UserDefaults read that doesn't trigger SwiftUI.
+        let _ = flow.state
         let known = KnownServerStore.all()
         if known.isEmpty {
             introState
