@@ -28,6 +28,10 @@ final class PairingFlow {
         let start: String
         let end: String
         let receivedAt: Date
+        /// Populated asynchronously once HealthKit has been read for the
+        /// pre/post windows. `nil` while still computing; non-nil once the
+        /// result has also been sent back to the Mac as `hrv_result`.
+        var hrv: WindowHRVDelta?
     }
 
     var state: State = .idle
@@ -35,6 +39,13 @@ final class PairingFlow {
 
     private var connection: MacConnection?
     private var runTask: Task<Void, Never>?
+    private let healthKit = HealthKitManager()
+
+    private static let wireDateParser: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
 
     /// Pair for the first time with a freshly scanned QR.
     func pair(with payload: QrPayload) {
@@ -181,6 +192,11 @@ final class PairingFlow {
                 receivedAuthed = true
                 if pairingId != nil {
                     _ = KeychainStore.storeSecret(secret, forServerId: serverId)
+                    // First-time pair · prompt for HealthKit access now,
+                    // while the user is engaged with the pairing flow and
+                    // the "we need HRV" intent is fresh. iOS only shows
+                    // the sheet once per type anyway.
+                    Task { await self.healthKit.requestAccess() }
                 }
                 KnownServerStore.upsert(KnownServer(
                     serverId: serverId,
@@ -211,7 +227,8 @@ final class PairingFlow {
                         techniqueName: techniqueName,
                         start: start,
                         end: end,
-                        receivedAt: Date()
+                        receivedAt: Date(),
+                        hrv: nil
                     )
                     if !receivedWindows.contains(where: { $0.id == summary.id }) {
                         receivedWindows.insert(summary, at: 0)
@@ -220,6 +237,13 @@ final class PairingFlow {
                         }
                     }
                     state = .receivingWindow(serverName: serverName, lastWindow: summary)
+                    Task { [weak self] in
+                        await self?.computeAndSendHrv(
+                            sessionId: sessionId,
+                            startIso: start,
+                            endIso: end
+                        )
+                    }
                 default:
                     state = .failed(reason: "Mac sent an unexpected message after authentication.")
                     return
@@ -232,6 +256,40 @@ final class PairingFlow {
 
         // Peer closed cleanly. UI can render an offer to reconnect.
         state = .idle
+    }
+
+    /// Read HRV for the pre/post windows around this session and send the
+    /// result back to the Mac. Best-effort · failures here never affect the
+    /// pairing connection. The Mac side already accepts a `noData` result,
+    /// matching the spec's "honest gaps" rule for sparse Watch samples.
+    private func computeAndSendHrv(sessionId: String, startIso: String, endIso: String) async {
+        guard let start = Self.wireDateParser.date(from: startIso),
+              let end = Self.wireDateParser.date(from: endIso) else {
+            return
+        }
+        let delta = await healthKit.computeWindowDelta(sessionStart: start, sessionEnd: end)
+
+        if let idx = receivedWindows.firstIndex(where: { $0.id == sessionId }) {
+            var updated = receivedWindows[idx]
+            updated.hrv = delta
+            receivedWindows[idx] = updated
+        }
+
+        let message = ClientMessage.hrvResult(
+            sessionId: sessionId,
+            preMs: delta.preMs,
+            postMs: delta.postMs,
+            deltaMs: delta.deltaMs,
+            sampleCounts: HrvSampleCounts(pre: delta.preCount, post: delta.postCount),
+            status: delta.status
+        )
+        do {
+            try await connection?.send(message)
+        } catch {
+            // Connection drop is fine · the Mac will request the result again
+            // next time the phone reconnects (when M6's queue replay drives
+            // the same window through).
+        }
     }
 
     private func friendlyConnectError(_ error: Error) -> String {

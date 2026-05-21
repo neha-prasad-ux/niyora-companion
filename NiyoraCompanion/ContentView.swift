@@ -147,15 +147,13 @@ struct ContentView: View {
             if !flow.receivedWindows.isEmpty {
                 Section("Received windows") {
                     ForEach(flow.receivedWindows) { w in
-                        VStack(alignment: .leading, spacing: 2) {
+                        VStack(alignment: .leading, spacing: 4) {
                             Text(w.techniqueName)
                                 .font(.body.weight(.medium))
-                            Text("\(w.start) → \(w.end)")
-                                .font(.caption2.monospaced())
-                                .foregroundStyle(.secondary)
                             Text(w.receivedAt.formatted(date: .omitted, time: .shortened))
                                 .font(.caption2)
                                 .foregroundStyle(.tertiary)
+                            hrvLine(for: w)
                         }
                         .padding(.vertical, 2)
                     }
@@ -163,13 +161,33 @@ struct ContentView: View {
             }
 
             Section {
-                Text("Keep Niyora Companion open right after a breathing session so it can receive the window. Background delivery (no need to keep the app open) ships in the next update.")
+                Text("This app is now woken silently by your Apple Watch logging a new HRV sample, usually within 5-15 minutes of finishing a session. You don't need to open the app for it to work.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             } footer: {
                 Text("HRV data stays on your iPhone and Mac. It is never uploaded.")
                     .font(.caption2)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func hrvLine(for w: PairingFlow.WindowSummary) -> some View {
+        if let hrv = w.hrv {
+            if let delta = hrv.deltaMs, let pre = hrv.preMs, let post = hrv.postMs {
+                let arrow = delta >= 0 ? "↑" : "↓"
+                Text("HRV \(arrow) \(String(format: "%.1f ms", abs(delta))) (pre \(String(format: "%.0f", pre)), post \(String(format: "%.0f", post)))")
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(delta >= 0 ? .green : .orange)
+            } else {
+                Text("Not enough HRV samples in this window")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        } else {
+            Text("Computing HRV…")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
         }
     }
 

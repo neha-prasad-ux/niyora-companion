@@ -27,6 +27,18 @@ enum WireProtocol {
 enum ClientMessage: Encodable, Equatable {
     case identify(clientId: String, clientName: String, pairingId: String?)
     case auth(hmacHex: String)
+    /// Computed HRV for a previously received session window. Sent back
+    /// over the same connection. Fields are optional so we honestly
+    /// surface 'no data this time' instead of inventing numbers when the
+    /// Watch sparsely logged HRV during a window.
+    case hrvResult(
+        sessionId: String,
+        preMs: Double?,
+        postMs: Double?,
+        deltaMs: Double?,
+        sampleCounts: HrvSampleCounts,
+        status: HrvResultStatus
+    )
 
     enum CodingKeys: String, CodingKey {
         case type
@@ -35,6 +47,12 @@ enum ClientMessage: Encodable, Equatable {
         case clientName = "client_name"
         case pairingId = "pairing_id"
         case hmacHex = "hmac_hex"
+        case sessionId = "session_id"
+        case preMs = "pre_ms"
+        case postMs = "post_ms"
+        case deltaMs = "delta_ms"
+        case sampleCounts = "sample_counts"
+        case status
     }
 
     func encode(to encoder: Encoder) throws {
@@ -49,8 +67,26 @@ enum ClientMessage: Encodable, Equatable {
         case let .auth(hmacHex):
             try c.encode("auth", forKey: .type)
             try c.encode(hmacHex, forKey: .hmacHex)
+        case let .hrvResult(sessionId, preMs, postMs, deltaMs, sampleCounts, status):
+            try c.encode("hrv_result", forKey: .type)
+            try c.encode(sessionId, forKey: .sessionId)
+            try c.encodeIfPresent(preMs, forKey: .preMs)
+            try c.encodeIfPresent(postMs, forKey: .postMs)
+            try c.encodeIfPresent(deltaMs, forKey: .deltaMs)
+            try c.encode(sampleCounts, forKey: .sampleCounts)
+            try c.encode(status.rawValue, forKey: .status)
         }
     }
+}
+
+struct HrvSampleCounts: Codable, Equatable {
+    let pre: UInt32
+    let post: UInt32
+}
+
+enum HrvResultStatus: String, Codable, Equatable {
+    case ok
+    case noData = "no_data"
 }
 
 // MARK: - Mac → Client
