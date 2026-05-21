@@ -41,11 +41,22 @@ final class PairingFlow {
     private var runTask: Task<Void, Never>?
     private let healthKit = HealthKitManager()
 
-    private static let wireDateParser: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime]
-        return f
-    }()
+    /// Parse an RFC 3339 string sent by the Mac. The wire carries two
+    /// flavours in practice · session `start` comes from JS
+    /// (`new Date().toISOString()`) which includes fractional seconds
+    /// (".000Z"), while `end` is recomputed by Rust `chrono` in
+    /// `SecondsFormat::Secs` which strips them. iOS's ISO8601DateFormatter
+    /// is strict per format-options bitmask, so a single formatter cannot
+    /// accept both. We try the fractional variant first, then fall back.
+    private static func parseWireDate(_ s: String) -> Date? {
+        let withFractional = ISO8601DateFormatter()
+        withFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = withFractional.date(from: s) { return d }
+
+        let whole = ISO8601DateFormatter()
+        whole.formatOptions = [.withInternetDateTime]
+        return whole.date(from: s)
+    }
 
     /// Pair for the first time with a freshly scanned QR.
     func pair(with payload: QrPayload) {
@@ -263,8 +274,17 @@ final class PairingFlow {
     /// pairing connection. The Mac side already accepts a `noData` result,
     /// matching the spec's "honest gaps" rule for sparse Watch samples.
     private func computeAndSendHrv(sessionId: String, startIso: String, endIso: String) async {
-        guard let start = Self.wireDateParser.date(from: startIso),
-              let end = Self.wireDateParser.date(from: endIso) else {
+        guard let start = Self.parseWireDate(startIso),
+              let end = Self.parseWireDate(endIso) else {
+            // Should not happen with the current Mac side, but if the wire
+            // ever drifts beyond what parseWireDate handles, log and bail
+            // rather than wedge the UI on "Computing HRV…" forever.
+            print("[PairingFlow] could not parse wire dates: start=\(startIso) end=\(endIso)")
+            if let idx = receivedWindows.firstIndex(where: { $0.id == sessionId }) {
+                var updated = receivedWindows[idx]
+                updated.hrv = WindowHRVDelta(preMs: nil, postMs: nil, preCount: 0, postCount: 0)
+                receivedWindows[idx] = updated
+            }
             return
         }
         let delta = await healthKit.computeWindowDelta(sessionStart: start, sessionEnd: end)
