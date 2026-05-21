@@ -1,6 +1,6 @@
 import Foundation
 
-/// Wire protocol v1 between Niyora Companion (iPhone) and Niyora (Mac).
+/// Wire protocol v2 between Niyora Companion (iPhone) and Niyora (Mac).
 ///
 /// NDJSON over TCP, one JSON object per line. Each frame carries a
 /// `type` discriminator. Unknown types are fatal on both sides ‑ a
@@ -8,18 +8,24 @@ import Foundation
 ///
 /// Lifecycle from the phone's perspective:
 ///
-///     →  identify   { client_id, client_name, pairing_id? }
-///     ←  hello      { server_id, server_name }
-///     ←  challenge  { nonce_hex }
-///     →  auth       { hmac_hex }                    // HMAC-SHA256(secret, nonce)
-///     ←  authed     or   ← auth_failed (then close)
-///     ←  window     { session_id, start, end, technique_name }   (one per session)
+///     →  identify             { client_id, client_name, pairing_id? }
+///     ←  hello                { server_id, server_name }
+///     ←  challenge            { nonce_hex }
+///     →  auth                 { hmac_hex }                  // HMAC-SHA256(secret, nonce)
+///     ←  authed   or   ← auth_failed (then close)
+///     ←  request_measurement  { session_id, phase, technique_name }   (zero or more per session)
 ///
 /// `pairing_id` is set only on the first connect after the user scans a
 /// fresh QR. On every subsequent reconnect it is absent and the Mac looks
 /// up the secret by `client_id`.
+///
+/// v2 vs v1: the HealthKit-on-window auto-read path is gone. Sessions no
+/// longer auto-emit a window at end. The Mac now sends one
+/// `request_measurement` per "Measure stress" tap (phase = "pre" or
+/// "post"). The phone responds with `hrv_result` once it has computed
+/// RMSSD + SDNN from a 30s green-channel PPG capture.
 enum WireProtocol {
-    static let version: UInt32 = 1
+    static let version: UInt32 = 2
 }
 
 // MARK: - Client → Mac
@@ -27,16 +33,16 @@ enum WireProtocol {
 enum ClientMessage: Encodable, Equatable {
     case identify(clientId: String, clientName: String, pairingId: String?)
     case auth(hmacHex: String)
-    /// Computed HRV for a previously received session window. Sent back
-    /// over the same connection. Fields are optional so we honestly
-    /// surface 'no data this time' instead of inventing numbers when the
-    /// Watch sparsely logged HRV during a window.
+    /// One per-phase PPG capture the phone produced for a session. The
+    /// Mac merges `pre` and `post` frames sharing the same `sessionId`
+    /// into a single history row.
     case hrvResult(
         sessionId: String,
-        preMs: Double?,
-        postMs: Double?,
-        deltaMs: Double?,
-        sampleCounts: HrvSampleCounts,
+        phase: MeasurementPhase,
+        rmssdMs: Double?,
+        sdnnMs: Double?,
+        sampleCount: UInt32,
+        snrDb: Double?,
         status: HrvResultStatus
     )
 
@@ -48,10 +54,11 @@ enum ClientMessage: Encodable, Equatable {
         case pairingId = "pairing_id"
         case hmacHex = "hmac_hex"
         case sessionId = "session_id"
-        case preMs = "pre_ms"
-        case postMs = "post_ms"
-        case deltaMs = "delta_ms"
-        case sampleCounts = "sample_counts"
+        case phase
+        case rmssdMs = "rmssd_ms"
+        case sdnnMs = "sdnn_ms"
+        case sampleCount = "sample_count"
+        case snrDb = "snr_db"
         case status
     }
 
@@ -67,26 +74,28 @@ enum ClientMessage: Encodable, Equatable {
         case let .auth(hmacHex):
             try c.encode("auth", forKey: .type)
             try c.encode(hmacHex, forKey: .hmacHex)
-        case let .hrvResult(sessionId, preMs, postMs, deltaMs, sampleCounts, status):
+        case let .hrvResult(sessionId, phase, rmssdMs, sdnnMs, sampleCount, snrDb, status):
             try c.encode("hrv_result", forKey: .type)
             try c.encode(sessionId, forKey: .sessionId)
-            try c.encodeIfPresent(preMs, forKey: .preMs)
-            try c.encodeIfPresent(postMs, forKey: .postMs)
-            try c.encodeIfPresent(deltaMs, forKey: .deltaMs)
-            try c.encode(sampleCounts, forKey: .sampleCounts)
+            try c.encode(phase.rawValue, forKey: .phase)
+            try c.encodeIfPresent(rmssdMs, forKey: .rmssdMs)
+            try c.encodeIfPresent(sdnnMs, forKey: .sdnnMs)
+            try c.encode(sampleCount, forKey: .sampleCount)
+            try c.encodeIfPresent(snrDb, forKey: .snrDb)
             try c.encode(status.rawValue, forKey: .status)
         }
     }
 }
 
-struct HrvSampleCounts: Codable, Equatable {
-    let pre: UInt32
-    let post: UInt32
-}
-
+/// Status the phone reports about a capture. `ok` means RMSSD and SDNN
+/// are present and trustworthy; the other variants explain why they are
+/// nil. The Mac forwards these into the per-phase history row so users
+/// see "low signal, try again" rather than a fabricated number.
 enum HrvResultStatus: String, Codable, Equatable {
     case ok
-    case noData = "no_data"
+    case lowSignal = "low_signal"
+    case fingerLifted = "finger_lifted"
+    case cancelled
 }
 
 // MARK: - Mac → Client
@@ -96,7 +105,11 @@ enum ServerMessage: Decodable, Equatable {
     case challenge(nonceHex: String)
     case authed
     case authFailed(reason: String)
-    case window(sessionId: String, start: String, end: String, techniqueName: String)
+    /// Mac asks the phone to start a 30s PPG capture for one side of a
+    /// session. Emitted only after a user "Measure stress" tap, never
+    /// automatically. Idempotent on (sessionId, phase) · the phone
+    /// dedupes if the same request arrives twice across a reconnect.
+    case requestMeasurement(sessionId: String, phase: MeasurementPhase, techniqueName: String)
 
     enum CodingKeys: String, CodingKey {
         case type
@@ -105,7 +118,7 @@ enum ServerMessage: Decodable, Equatable {
         case nonceHex = "nonce_hex"
         case reason
         case sessionId = "session_id"
-        case start, end
+        case phase
         case techniqueName = "technique_name"
     }
 
@@ -124,11 +137,10 @@ enum ServerMessage: Decodable, Equatable {
             self = .authed
         case "auth_failed":
             self = .authFailed(reason: try c.decode(String.self, forKey: .reason))
-        case "window":
-            self = .window(
+        case "request_measurement":
+            self = .requestMeasurement(
                 sessionId: try c.decode(String.self, forKey: .sessionId),
-                start: try c.decode(String.self, forKey: .start),
-                end: try c.decode(String.self, forKey: .end),
+                phase: try c.decode(MeasurementPhase.self, forKey: .phase),
                 techniqueName: try c.decode(String.self, forKey: .techniqueName)
             )
         default:

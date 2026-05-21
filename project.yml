@@ -10,11 +10,17 @@ settings:
     CURRENT_PROJECT_VERSION: "1"
     SWIFT_VERSION: "5.0"
     GENERATE_INFOPLIST_FILE: "YES"
-    # Shown in the HealthKit permission sheet. Honest about what and why.
-    INFOPLIST_KEY_NSHealthShareUsageDescription: "Niyora reads your Heart Rate Variability to show whether your breathing sessions help you relax. This data stays on your devices and is never uploaded."
-    # Shown when the app first scans the pairing QR. Camera is used only
-    # to read the QR ‑ no photos are taken, no video is recorded.
-    INFOPLIST_KEY_NSCameraUsageDescription: "Niyora Companion scans the pairing QR on your Mac. The camera is used only for that scan."
+    # Shown in the HealthKit permission sheet. The shipping HRV path is
+    # PPG (no HealthKit); HealthKit is read only by the DEBUG spike
+    # screen, which we still ship the entitlement for so a developer
+    # build can sanity-check Watch HRV in isolation.
+    INFOPLIST_KEY_NSHealthShareUsageDescription: "Used by the debug HRV screen to compare your Apple Watch's HRV against the camera-based stress estimate. Stays on your devices."
+    # Camera is used for two things, both explicitly initiated: scanning
+    # the pairing QR (once, at setup) and taking a 30 second stress
+    # estimate from your fingertip on the lens (only after you tap
+    # Measure stress on the Mac). No photos are taken; no video is
+    # recorded or sent anywhere.
+    INFOPLIST_KEY_NSCameraUsageDescription: "Niyora Companion uses the camera to scan the pairing QR on your Mac, and to take a 30 second stress estimate from your fingertip when you tap Measure stress. Nothing leaves your devices."
     # Shown when the app first opens a TCP connection to your Mac. iOS
     # requires this for any peer connection on the LAN.
     INFOPLIST_KEY_NSLocalNetworkUsageDescription: "Niyora Companion connects to Niyora on your Mac over your local wifi. No data is uploaded; the connection stays on your home network."

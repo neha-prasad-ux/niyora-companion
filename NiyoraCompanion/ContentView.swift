@@ -4,19 +4,23 @@ import SwiftUI
 ///
 /// 1. No Mac paired yet: introduction + a single "Connect to Mac" button
 ///    that opens the QR scanner.
-/// 2. At least one Mac paired: paired status, last received window, and
-///    a small footer reminding the user to keep the app foreground until
-///    the M5+M6 background path lands.
+/// 2. At least one Mac paired: paired status, last received request, and
+///    a small footer about how measurements work.
 /// 3. Scanning: full-screen camera preview with a cancel chip.
 ///
-/// The original HealthKit spike (M1-2) lives on the Debug tab, only
-/// visible in DEBUG builds. It's still useful for sanity-checking that
-/// the Watch is writing HRV samples before we ship the background path.
+/// When the Mac sends a `request_measurement` frame, `MeasurementSheet`
+/// presents over the whole view to drive a 30s PPG capture.
+///
+/// The original HealthKit spike (M1-2) lives behind a DEBUG-only
+/// toolbar button. It is no longer part of the shipping data path · PPG
+/// is the source now · but the spike helped de-risk the early HealthKit
+/// work and is useful for diagnosing Watch HRV in isolation.
 struct ContentView: View {
     @State private var flow = PairingFlow()
     @State private var showingScanner = false
     @State private var scannerStatus: QRScannerView.Status = .ready
     @State private var lastScanError: String?
+    @State private var measurementController: MeasurementController?
 
     var body: some View {
         NavigationStack {
@@ -37,9 +41,13 @@ struct ContentView: View {
         .fullScreenCover(isPresented: $showingScanner) {
             scannerSheet
         }
+        .fullScreenCover(item: $flow.pendingRequest) { request in
+            measurementSheet(for: request)
+        }
         .onAppear {
             // Auto-reconnect to the first known Mac on launch. Real
-            // mDNS-based discovery for IP changes comes in M6.
+            // mDNS-based discovery for IP changes comes in a later
+            // milestone if it proves necessary.
             if case .idle = flow.state, let first = KnownServerStore.all().first {
                 flow.reconnect(to: first)
             }
@@ -75,7 +83,7 @@ struct ContentView: View {
                 VStack(spacing: 8) {
                     Text("Connect to your Mac")
                         .font(.title2.weight(.semibold))
-                    Text("Niyora on your Mac will send you a session window each time you finish breathing. This app reads your Apple Watch HRV for that window and sends the result back. Nothing leaves your devices.")
+                    Text("Niyora on your Mac will ask this app for a 30 second stress estimate when you tap Measure stress. Hold your fingertip on the back camera and flashlight, that's it. Nothing leaves your devices.")
                         .multilineTextAlignment(.center)
                         .font(.callout)
                         .foregroundStyle(.secondary)
@@ -144,56 +152,20 @@ struct ContentView: View {
                 }
             }
 
-            if !flow.receivedWindows.isEmpty {
-                Section("Received windows") {
-                    ForEach(flow.receivedWindows) { w in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(w.techniqueName)
-                                .font(.body.weight(.medium))
-                            Text(w.receivedAt.formatted(date: .omitted, time: .shortened))
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
-                            hrvLine(for: w)
-                        }
-                        .padding(.vertical, 2)
-                    }
-                }
-            }
-
             Section {
-                Text("This app is now woken silently by your Apple Watch logging a new HRV sample, usually within 5-15 minutes of finishing a session. You don't need to open the app for it to work.")
+                Text("Keep the app open to receive measurement requests. We turn on the camera and flashlight only while you're actively measuring.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             } footer: {
-                Text("HRV data stays on your iPhone and Mac. It is never uploaded.")
+                Text("Measurements stay on your iPhone and Mac. They are never uploaded.")
                     .font(.caption2)
             }
-        }
-    }
-
-    @ViewBuilder
-    private func hrvLine(for w: PairingFlow.WindowSummary) -> some View {
-        if let hrv = w.hrv {
-            if let delta = hrv.deltaMs, let pre = hrv.preMs, let post = hrv.postMs {
-                let arrow = delta >= 0 ? "↑" : "↓"
-                Text("HRV \(arrow) \(String(format: "%.1f ms", abs(delta))) (pre \(String(format: "%.0f", pre)), post \(String(format: "%.0f", post)))")
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(delta >= 0 ? .green : .orange)
-            } else {
-                Text("Not enough HRV samples in this window")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-        } else {
-            Text("Computing HRV…")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
         }
     }
 
     private var statusColor: Color {
         switch flow.state {
-        case .paired, .receivingWindow: return .green
+        case .paired, .measuring: return .green
         case .authenticating, .connecting: return .yellow
         case .failed: return .red
         case .idle: return .gray
@@ -202,17 +174,72 @@ struct ContentView: View {
 
     private var stateDescription: String {
         switch flow.state {
-        case .idle: return "Not connected. Tap a paired Mac on your Mac's Niyora app to reconnect."
+        case .idle: return "Not connected. Tap the Niyora menu bar icon on your Mac to wake it up."
         case .connecting(let name): return "Connecting to \(name)…"
         case .authenticating(let name): return "Authenticating with \(name)…"
-        case .paired(let name): return "Connected to \(name). Waiting for sessions."
-        case .receivingWindow(let name, let w):
-            if let w {
-                return "Connected to \(name). Last window: \(w.techniqueName)."
-            }
-            return "Connected to \(name)."
+        case .paired(let name): return "Connected to \(name). Waiting for measurement requests."
+        case .measuring(let name, _, let phase):
+            return "Measuring \(phase == .pre ? "before" : "after") · \(name)"
         case .failed(let reason): return reason
         }
+    }
+
+    // MARK: - Measurement
+
+    @ViewBuilder
+    private func measurementSheet(for request: PairingFlow.PendingRequest) -> some View {
+        let controller = makeOrReuseController(for: request)
+        MeasurementSheet(
+            controller: controller,
+            onCancel: {
+                controller.cancel()
+                flow.clearPendingRequest()
+                measurementController = nil
+            },
+            onRetry: {
+                let fresh = MeasurementController(
+                    sessionId: request.sessionId,
+                    phase: request.phase,
+                    techniqueName: request.techniqueName
+                )
+                measurementController = fresh
+                Task { await fresh.start() }
+            },
+            onDone: {
+                Task {
+                    if case let .finished(result) = controller.state {
+                        await flow.sendResult(
+                            sessionId: request.sessionId,
+                            phase: request.phase,
+                            result: result
+                        )
+                    } else {
+                        flow.clearPendingRequest()
+                    }
+                    measurementController = nil
+                }
+            }
+        )
+        .onAppear {
+            if case .idle = controller.state {
+                Task { await controller.start() }
+            }
+        }
+    }
+
+    private func makeOrReuseController(for request: PairingFlow.PendingRequest) -> MeasurementController {
+        if let existing = measurementController,
+           existing.sessionId == request.sessionId,
+           existing.phase == request.phase {
+            return existing
+        }
+        let fresh = MeasurementController(
+            sessionId: request.sessionId,
+            phase: request.phase,
+            techniqueName: request.techniqueName
+        )
+        measurementController = fresh
+        return fresh
     }
 
     // MARK: - Scanner
@@ -240,7 +267,7 @@ struct ContentView: View {
             if scannerStatus == .denied {
                 deniedOverlay(
                     title: "Camera access denied",
-                    body: "Niyora Companion uses the camera only to scan the pairing QR on your Mac. Enable camera access in Settings → Niyora Companion."
+                    body: "Niyora Companion uses the camera to scan the pairing QR on your Mac and to take stress estimates from your fingertip. Enable camera access in Settings → Niyora Companion."
                 )
             } else if scannerStatus == .unsupported {
                 deniedOverlay(
