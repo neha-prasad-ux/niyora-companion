@@ -1,41 +1,40 @@
 import Foundation
 
-/// One HRV (SDNN) sample, in milliseconds, as recorded by the Apple Watch.
+/// Which side of a breathing session a capture covers. Matches the wire
+/// frame's `phase` string · `Codable` round-trips through the raw value.
+enum MeasurementPhase: String, Codable, Equatable {
+    case pre
+    case post
+}
+
+/// One HRV (SDNN) sample, in milliseconds, as recorded by the Apple
+/// Watch. Used only by the DEBUG HealthKit spike screen now · the
+/// shipping path is PPG, not HealthKit.
 struct HRVReading: Identifiable {
     let id = UUID()
     let date: Date
     let sdnnMs: Double
 }
 
-/// The result of computing pre/post HRV for a session window. Either both
-/// sides have data (delta is real) or at least one is empty (status is
-/// `noData` and the Mac shows "not enough data this time", per the spec's
-/// honest-gaps rule).
-struct WindowHRVDelta: Equatable {
-    let preMs: Double?
-    let postMs: Double?
-    let preCount: UInt32
-    let postCount: UInt32
-
-    /// Whether both sides have at least one sample.
-    var hasBothSides: Bool {
-        preMs != nil && postMs != nil
-    }
-
-    /// post - pre when both sides exist.
-    var deltaMs: Double? {
-        guard let pre = preMs, let post = postMs else { return nil }
-        return post - pre
-    }
-
-    var status: HrvResultStatus {
-        hasBothSides ? .ok : .noData
-    }
+/// The result of computing HRV from a 30s PPG capture. Either status is
+/// `.ok` and both metrics are present, or status explains why metrics
+/// are absent (see `HrvResultStatus`).
+struct PPGMeasurementResult: Equatable {
+    /// Root-mean-square of successive IBI differences. The primary HRV
+    /// metric for short PPG · nil unless status is `.ok`.
+    let rmssdMs: Double?
+    /// Standard deviation of IBIs. Secondary · also nil unless `.ok`.
+    let sdnnMs: Double?
+    /// Number of inter-beat intervals detected in the capture.
+    let sampleCount: UInt32
+    /// Estimated signal-to-noise ratio in dB. Forwarded to the Mac.
+    let snrDb: Double?
+    let status: HrvResultStatus
 }
 
-/// The result of reading HRV over a time window. An empty `samples` array is
-/// a normal, expected outcome: HRV is sparse and a short window may contain
-/// nothing. `error` is set only when the HealthKit query itself failed.
+/// The result of reading HRV over a time window. An empty `samples`
+/// array is normal · HRV is sparse and a short window may contain
+/// nothing. Used only by the DEBUG spike screen.
 struct HRVWindow {
     let start: Date
     let end: Date

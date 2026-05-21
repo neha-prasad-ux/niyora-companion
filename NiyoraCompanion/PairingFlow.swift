@@ -4,11 +4,13 @@ import Network
 import UIKit
 
 /// State machine that drives a `MacConnection` through the protocol
-/// lifecycle (`identify → hello → challenge → auth → authed → window`)
-/// and stores the resulting shared secret in the Keychain on success.
+/// lifecycle (`identify → hello → challenge → auth → authed →
+/// request_measurement`) and stores the resulting shared secret in the
+/// Keychain on success.
 ///
 /// One instance owns the connection lifetime. The owning view layer
-/// subscribes to `state` (Observation) to render UI.
+/// subscribes to `state` (Observation) to render UI, and to
+/// `pendingRequest` to know when to present the measurement sheet.
 @MainActor
 @Observable
 final class PairingFlow {
@@ -18,45 +20,32 @@ final class PairingFlow {
         case connecting(serverName: String)
         case authenticating(serverName: String)
         case paired(serverName: String)
-        case receivingWindow(serverName: String, lastWindow: WindowSummary?)
+        case measuring(serverName: String, sessionId: String, phase: MeasurementPhase)
         case failed(reason: String)
     }
 
-    struct WindowSummary: Equatable, Identifiable {
-        let id: String      // session_id ‑ idempotent across queue replays
+    /// One measurement the Mac has asked us to take. The view layer
+    /// reads this to decide whether to present the sheet, and clears it
+    /// once the result has been sent back (or the sheet is dismissed).
+    struct PendingRequest: Equatable, Identifiable {
+        var id: String { "\(sessionId):\(phase.rawValue)" }
+        let sessionId: String
+        let phase: MeasurementPhase
         let techniqueName: String
-        let start: String
-        let end: String
-        let receivedAt: Date
-        /// Populated asynchronously once HealthKit has been read for the
-        /// pre/post windows. `nil` while still computing; non-nil once the
-        /// result has also been sent back to the Mac as `hrv_result`.
-        var hrv: WindowHRVDelta?
     }
 
     var state: State = .idle
-    var receivedWindows: [WindowSummary] = []
+    /// The most recently received `request_measurement` from the Mac
+    /// that has not yet been resolved. ContentView watches this and
+    /// presents `MeasurementSheet` when non-nil.
+    var pendingRequest: PendingRequest?
+    /// session_id:phase keys already handled this connection, so a
+    /// queue replay does not re-prompt the user for a capture they
+    /// already produced. Reset on disconnect.
+    private var seenRequests: Set<String> = []
 
     private var connection: MacConnection?
     private var runTask: Task<Void, Never>?
-    private let healthKit = HealthKitManager()
-
-    /// Parse an RFC 3339 string sent by the Mac. The wire carries two
-    /// flavours in practice · session `start` comes from JS
-    /// (`new Date().toISOString()`) which includes fractional seconds
-    /// (".000Z"), while `end` is recomputed by Rust `chrono` in
-    /// `SecondsFormat::Secs` which strips them. iOS's ISO8601DateFormatter
-    /// is strict per format-options bitmask, so a single formatter cannot
-    /// accept both. We try the fractional variant first, then fall back.
-    private static func parseWireDate(_ s: String) -> Date? {
-        let withFractional = ISO8601DateFormatter()
-        withFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let d = withFractional.date(from: s) { return d }
-
-        let whole = ISO8601DateFormatter()
-        whole.formatOptions = [.withInternetDateTime]
-        return whole.date(from: s)
-    }
 
     /// Pair for the first time with a freshly scanned QR.
     func pair(with payload: QrPayload) {
@@ -87,8 +76,50 @@ final class PairingFlow {
         runTask = nil
         let conn = connection
         connection = nil
+        seenRequests.removeAll()
+        pendingRequest = nil
         Task { await conn?.cancel() }
         state = .idle
+    }
+
+    /// Called by the measurement sheet once the controller produces a
+    /// final result. Sends the `hrv_result` frame back to the Mac and
+    /// clears the pending request so the next one can surface.
+    func sendResult(
+        sessionId: String,
+        phase: MeasurementPhase,
+        result: PPGMeasurementResult
+    ) async {
+        let message = ClientMessage.hrvResult(
+            sessionId: sessionId,
+            phase: phase,
+            rmssdMs: result.rmssdMs,
+            sdnnMs: result.sdnnMs,
+            sampleCount: result.sampleCount,
+            snrDb: result.snrDb,
+            status: result.status
+        )
+        do {
+            try await connection?.send(message)
+        } catch {
+            // Connection drop is fine · the Mac will request the same
+            // measurement again next time the phone reconnects (queue
+            // replay), and the seenRequests cache resets on disconnect.
+        }
+        pendingRequest = nil
+        if case let .measuring(name, _, _) = state {
+            state = .paired(serverName: name)
+        }
+    }
+
+    /// Dismiss the current request without producing a result · used
+    /// when the user closes the sheet before the capture completes and
+    /// the controller emits a `.cancelled` result.
+    func clearPendingRequest() {
+        pendingRequest = nil
+        if case let .measuring(name, _, _) = state {
+            state = .paired(serverName: name)
+        }
     }
 
     // MARK: - Private
@@ -105,6 +136,8 @@ final class PairingFlow {
         let priorConnection = connection
         connection = nil
         Task { await priorConnection?.cancel() }
+        seenRequests.removeAll()
+        pendingRequest = nil
 
         guard let secret else {
             state = .failed(reason: pairingId == nil
@@ -203,11 +236,6 @@ final class PairingFlow {
                 receivedAuthed = true
                 if pairingId != nil {
                     _ = KeychainStore.storeSecret(secret, forServerId: serverId)
-                    // First-time pair · prompt for HealthKit access now,
-                    // while the user is engaged with the pairing flow and
-                    // the "we need HRV" intent is fresh. iOS only shows
-                    // the sheet once per type anyway.
-                    Task { await self.healthKit.requestAccess() }
                 }
                 KnownServerStore.upsert(KnownServer(
                     serverId: serverId,
@@ -219,42 +247,30 @@ final class PairingFlow {
             case .authFailed(let reason):
                 state = .failed(reason: "Mac refused the pairing: \(reason)")
                 return
-            case .window:
-                state = .failed(reason: "Mac sent a window before authentication.")
+            case .requestMeasurement:
+                state = .failed(reason: "Mac sent a measurement request before authentication.")
                 return
             }
         }
 
-        // Main loop: receive windows until the peer closes or task is
-        // cancelled. iOS will suspend us shortly after the app backgrounds
-        // (the M6 work and HealthKit Background Delivery in PR 3 cover
-        // the wake-and-drain path).
+        // Main loop: receive measurement requests until the peer closes
+        // or the task is cancelled. iOS will suspend us shortly after
+        // the app backgrounds · the PPG path is foreground-only by
+        // design (the user has to hold their finger on the lens), so a
+        // dropped connection is not a regression here.
         do {
             while let msg = try await stream.next() {
                 switch msg {
-                case .window(let sessionId, let start, let end, let techniqueName):
-                    let summary = WindowSummary(
-                        id: sessionId,
-                        techniqueName: techniqueName,
-                        start: start,
-                        end: end,
-                        receivedAt: Date(),
-                        hrv: nil
+                case .requestMeasurement(let sessionId, let phase, let techniqueName):
+                    let key = "\(sessionId):\(phase.rawValue)"
+                    if seenRequests.contains(key) { continue }
+                    seenRequests.insert(key)
+                    pendingRequest = PendingRequest(
+                        sessionId: sessionId,
+                        phase: phase,
+                        techniqueName: techniqueName
                     )
-                    if !receivedWindows.contains(where: { $0.id == summary.id }) {
-                        receivedWindows.insert(summary, at: 0)
-                        if receivedWindows.count > 50 {
-                            receivedWindows.removeLast(receivedWindows.count - 50)
-                        }
-                    }
-                    state = .receivingWindow(serverName: serverName, lastWindow: summary)
-                    Task { [weak self] in
-                        await self?.computeAndSendHrv(
-                            sessionId: sessionId,
-                            startIso: start,
-                            endIso: end
-                        )
-                    }
+                    state = .measuring(serverName: serverName, sessionId: sessionId, phase: phase)
                 default:
                     state = .failed(reason: "Mac sent an unexpected message after authentication.")
                     return
@@ -267,49 +283,6 @@ final class PairingFlow {
 
         // Peer closed cleanly. UI can render an offer to reconnect.
         state = .idle
-    }
-
-    /// Read HRV for the pre/post windows around this session and send the
-    /// result back to the Mac. Best-effort · failures here never affect the
-    /// pairing connection. The Mac side already accepts a `noData` result,
-    /// matching the spec's "honest gaps" rule for sparse Watch samples.
-    private func computeAndSendHrv(sessionId: String, startIso: String, endIso: String) async {
-        guard let start = Self.parseWireDate(startIso),
-              let end = Self.parseWireDate(endIso) else {
-            // Should not happen with the current Mac side, but if the wire
-            // ever drifts beyond what parseWireDate handles, log and bail
-            // rather than wedge the UI on "Computing HRV…" forever.
-            print("[PairingFlow] could not parse wire dates: start=\(startIso) end=\(endIso)")
-            if let idx = receivedWindows.firstIndex(where: { $0.id == sessionId }) {
-                var updated = receivedWindows[idx]
-                updated.hrv = WindowHRVDelta(preMs: nil, postMs: nil, preCount: 0, postCount: 0)
-                receivedWindows[idx] = updated
-            }
-            return
-        }
-        let delta = await healthKit.computeWindowDelta(sessionStart: start, sessionEnd: end)
-
-        if let idx = receivedWindows.firstIndex(where: { $0.id == sessionId }) {
-            var updated = receivedWindows[idx]
-            updated.hrv = delta
-            receivedWindows[idx] = updated
-        }
-
-        let message = ClientMessage.hrvResult(
-            sessionId: sessionId,
-            preMs: delta.preMs,
-            postMs: delta.postMs,
-            deltaMs: delta.deltaMs,
-            sampleCounts: HrvSampleCounts(pre: delta.preCount, post: delta.postCount),
-            status: delta.status
-        )
-        do {
-            try await connection?.send(message)
-        } catch {
-            // Connection drop is fine · the Mac will request the result again
-            // next time the phone reconnects (when M6's queue replay drives
-            // the same window through).
-        }
     }
 
     private func friendlyConnectError(_ error: Error) -> String {
@@ -328,3 +301,4 @@ final class PairingFlow {
         }
     }
 }
+
