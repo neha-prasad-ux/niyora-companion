@@ -51,6 +51,34 @@ final class HealthKitManager {
         }
     }
 
+    /// Compute pre/post HRV for a session window the Mac sent us. The
+    /// pre window is the 5 minutes before `sessionStart`, the post window
+    /// is the 5 minutes after `sessionEnd`. Returns a result suitable for
+    /// direct serialisation as a `hrv_result` wire frame.
+    ///
+    /// The spec's "honest gaps" rule: if either window has zero samples,
+    /// we report `noData` rather than fabricating means from one side.
+    /// Per-window window length is fixed at 5 minutes for v1, matching
+    /// the spec's open decision #3.
+    func computeWindowDelta(sessionStart: Date, sessionEnd: Date) async -> WindowHRVDelta {
+        let fiveMinutes: TimeInterval = 5 * 60
+        let preStart = sessionStart.addingTimeInterval(-fiveMinutes)
+        let preEnd = sessionStart
+        let postStart = sessionEnd
+        let postEnd = sessionEnd.addingTimeInterval(fiveMinutes)
+
+        async let preWindow = readHRV(from: preStart, to: preEnd)
+        async let postWindow = readHRV(from: postStart, to: postEnd)
+        let (pre, post) = await (preWindow, postWindow)
+
+        return WindowHRVDelta(
+            preMs: pre.meanSdnnMs,
+            postMs: post.meanSdnnMs,
+            preCount: UInt32(pre.samples.count),
+            postCount: UInt32(post.samples.count)
+        )
+    }
+
     /// Reads every HRV (SDNN) sample in `[start, end]` and returns them with a
     /// mean. An empty result is normal — do not treat it as an error.
     func readHRV(from start: Date, to end: Date) async -> HRVWindow {
