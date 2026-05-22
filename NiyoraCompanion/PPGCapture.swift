@@ -72,7 +72,10 @@ final class PPGCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         session.commitConfiguration()
 
         // Pin to 30 fps so the signal processor's assumed sampleRateHz
-        // matches reality. Has to be set on the device, not the session.
+        // matches reality. Frame-rate config is fine pre-running, but
+        // torch is NOT · `setTorchModeOnWithLevel` only takes effect
+        // while the capture session is running, so it gets a second
+        // lockForConfiguration block after startRunning below.
         do {
             try dev.lockForConfiguration()
             let target = CMTime(value: 1, timescale: 30)
@@ -81,19 +84,30 @@ final class PPGCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
             if dev.isExposureModeSupported(.continuousAutoExposure) {
                 dev.exposureMode = .continuousAutoExposure
             }
-            // Torch on at ~50% · enough to illuminate the finger, not
-            // so bright that the AGC clips the signal into saturation.
-            if dev.isTorchModeSupported(.on) {
-                try dev.setTorchModeOn(level: 0.5)
-            }
             dev.unlockForConfiguration()
         } catch {
-            throw StartError.configurationFailed("Could not configure torch / fps: \(error.localizedDescription)")
+            throw StartError.configurationFailed("Could not configure fps: \(error.localizedDescription)")
         }
 
         await Task.detached(priority: .userInitiated) { [session] in
             session.startRunning()
         }.value
+
+        // Now that the session is running, the torch will actually turn
+        // on. Without this second pass we get no light, ambient noise
+        // gets misread as a finger, and the pipeline produces garbage.
+        do {
+            try dev.lockForConfiguration()
+            if dev.hasTorch, dev.isTorchModeSupported(.on) {
+                try dev.setTorchModeOn(level: 0.5)
+            }
+            dev.unlockForConfiguration()
+        } catch {
+            // Soft-fail · the capture still proceeds (the finger-on
+            // detector will catch a no-light situation and abort with
+            // low_signal), but we let the user know.
+            print("[PPGCapture] torch on failed: \(error.localizedDescription)")
+        }
     }
 
     /// Stop the session and turn the torch off. Idempotent.

@@ -47,19 +47,23 @@ struct PPGSignalProcessor {
     }
 
     /// Whether the most recent window of samples looks like a finger is
-    /// on the lens. Heuristic: with a finger and the torch on, the green
-    /// channel sits in a narrow high-value band; without a finger it
-    /// either spans wildly or sits near zero. We check the last 0.5s.
+    /// on the lens. With the torch on (the only mode we support), a
+    /// finger on the lens produces a high-but-not-saturated green
+    /// channel · roughly 100..230 with low variance. No finger gives
+    /// either near-saturation (torch reflecting off nothing) or wide
+    /// swings (camera sees the room). We check the last 0.7s.
     func fingerLikelyOnLens() -> Bool {
-        let lookback = Int(Self.sampleRateHz * 0.5)
+        let lookback = Int(Self.sampleRateHz * 0.7)
         guard samples.count >= lookback else { return false }
         let tail = samples.suffix(lookback)
         let mean = tail.reduce(0, +) / Double(tail.count)
         let variance = tail.reduce(0.0) { acc, v in acc + (v - mean) * (v - mean) } / Double(tail.count)
         let std = variance.squareRoot()
-        // Mean in a reasonable range, std not absurd. Numbers tuned for
-        // an 8-bit green channel (0..255) averaged over the ROI.
-        return mean > 60 && mean < 245 && std < 25
+        // Tightened band · the previous (60..245, std<25) range was
+        // loose enough that ambient light triggered false positives
+        // when the torch was off. With torch on these are the values
+        // you actually see from a finger.
+        return mean > 100 && mean < 230 && std < 18
     }
 
     /// Run the full pipeline against the current buffer and return the
@@ -88,6 +92,25 @@ struct PPGSignalProcessor {
         let snr = estimateSnrDb(filtered)
 
         guard ibisMs.count >= Self.minIbiCount, snr >= Self.minSnrDb else {
+            return PPGMeasurementResult(
+                rmssdMs: nil, sdnnMs: nil,
+                sampleCount: UInt32(ibisMs.count),
+                snrDb: snr,
+                status: .lowSignal
+            )
+        }
+
+        // Physiologic sanity. Without these guards a no-finger capture
+        // can sneak through with garbage values (RMSSD ~1400 ms, HR
+        // ~20 bpm), because the peak detector is finding random local
+        // maxima in noise. Reject anything outside what a human body
+        // could plausibly produce.
+        let meanIbiMs = ibisMs.reduce(0, +) / Double(ibisMs.count)
+        let heartRateBpm = meanIbiMs > 0 ? 60_000.0 / meanIbiMs : 0
+        let rmssdValue = rmssd(ibisMs) ?? 0
+        let humanLikelyHr = heartRateBpm >= 40 && heartRateBpm <= 180
+        let humanLikelyRmssd = rmssdValue >= 5 && rmssdValue <= 250
+        guard humanLikelyHr, humanLikelyRmssd else {
             return PPGMeasurementResult(
                 rmssdMs: nil, sdnnMs: nil,
                 sampleCount: UInt32(ibisMs.count),
