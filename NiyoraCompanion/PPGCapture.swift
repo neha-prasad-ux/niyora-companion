@@ -37,6 +37,64 @@ final class PPGCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     private let sampleQueue = DispatchQueue(label: "niyora.ppg.samples")
     private var device: AVCaptureDevice?
     private var onFrame: FrameHandler?
+    private var observers: [NSObjectProtocol] = []
+
+    override init() {
+        super.init()
+        // Watch for system-level interruptions of the capture stream.
+        // FigXPC err=-17281 floods on user devices were the symptom of
+        // these notifications firing while we were oblivious · this
+        // surface lets us see the real reason (thermal pressure,
+        // another foreground app, hardware contention) instead of
+        // guessing from the FigXPC noise.
+        let nc = NotificationCenter.default
+        observers.append(nc.addObserver(
+            forName: AVCaptureSession.wasInterruptedNotification,
+            object: session,
+            queue: .main
+        ) { note in
+            #if DEBUG
+            let rawReason = note.userInfo?[AVCaptureSessionInterruptionReasonKey] as? Int ?? -1
+            print("[PPGCapture] session WAS INTERRUPTED · reason=\(rawReason) (\(Self.interruptionReasonName(rawReason)))")
+            #endif
+        })
+        observers.append(nc.addObserver(
+            forName: AVCaptureSession.interruptionEndedNotification,
+            object: session,
+            queue: .main
+        ) { _ in
+            #if DEBUG
+            print("[PPGCapture] session interruption ENDED")
+            #endif
+        })
+        observers.append(nc.addObserver(
+            forName: AVCaptureSession.runtimeErrorNotification,
+            object: session,
+            queue: .main
+        ) { note in
+            #if DEBUG
+            let err = note.userInfo?[AVCaptureSessionErrorKey]
+            print("[PPGCapture] session RUNTIME ERROR · \(String(describing: err))")
+            #endif
+        })
+    }
+
+    deinit {
+        for o in observers { NotificationCenter.default.removeObserver(o) }
+    }
+
+    #if DEBUG
+    private static func interruptionReasonName(_ raw: Int) -> String {
+        switch raw {
+        case 1: return "videoDeviceNotAvailableInBackground"
+        case 2: return "audioDeviceInUseByAnotherClient"
+        case 3: return "videoDeviceInUseByAnotherClient"
+        case 4: return "videoDeviceNotAvailableWithMultipleForegroundApps"
+        case 5: return "videoDeviceNotAvailableDueToSystemPressure"
+        default: return "unknown"
+        }
+    }
+    #endif
 
     /// Start a capture. Returns once the session is running with the
     /// torch on, or throws if the camera or torch is unavailable.
