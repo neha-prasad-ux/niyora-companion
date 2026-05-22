@@ -16,9 +16,11 @@ import UIKit
 /// a cleaner pulse signal than averaging the whole frame.
 final class PPGCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
 
-    /// Called on the main actor with each new green-channel mean. The
-    /// owning controller appends to the signal processor and updates UI.
-    typealias FrameHandler = @MainActor (Double) -> Void
+    /// Called on the main actor with each new frame's color summary.
+    /// Green is the PPG signal channel (hemoglobin absorbs green); red
+    /// is carried alongside so the finger-on detector can use the
+    /// R/G ratio as a robust "is a finger on the torch" signal.
+    typealias FrameHandler = @MainActor (_ green: Double, _ red: Double) -> Void
 
     enum StartError: Error {
         case noBackCamera
@@ -26,11 +28,78 @@ final class PPGCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         case configurationFailed(String)
     }
 
-    private let session = AVCaptureSession()
+    /// The shared capture session · exposed (read-only is enforced by
+    /// the actor / single-writer pattern) so the sheet can show a live
+    /// preview during the place-finger stage. Same session that drives
+    /// the per-frame green-channel sampling.
+    let session = AVCaptureSession()
     private let output = AVCaptureVideoDataOutput()
     private let sampleQueue = DispatchQueue(label: "niyora.ppg.samples")
     private var device: AVCaptureDevice?
     private var onFrame: FrameHandler?
+    private var observers: [NSObjectProtocol] = []
+    /// Periodic background task that re-arms the torch when iOS silently
+    /// turns it off mid-capture. Some devices (thermal, power policy)
+    /// drop the torch a few seconds after enabling it · the keeper
+    /// notices via isTorchActive and forces it back on.
+    private var torchKeeperTask: Task<Void, Never>?
+
+    override init() {
+        super.init()
+        // Watch for system-level interruptions of the capture stream.
+        // FigXPC err=-17281 floods on user devices were the symptom of
+        // these notifications firing while we were oblivious · this
+        // surface lets us see the real reason (thermal pressure,
+        // another foreground app, hardware contention) instead of
+        // guessing from the FigXPC noise.
+        let nc = NotificationCenter.default
+        observers.append(nc.addObserver(
+            forName: AVCaptureSession.wasInterruptedNotification,
+            object: session,
+            queue: .main
+        ) { note in
+            #if DEBUG
+            let rawReason = note.userInfo?[AVCaptureSessionInterruptionReasonKey] as? Int ?? -1
+            print("[PPGCapture] session WAS INTERRUPTED · reason=\(rawReason) (\(Self.interruptionReasonName(rawReason)))")
+            #endif
+        })
+        observers.append(nc.addObserver(
+            forName: AVCaptureSession.interruptionEndedNotification,
+            object: session,
+            queue: .main
+        ) { _ in
+            #if DEBUG
+            print("[PPGCapture] session interruption ENDED")
+            #endif
+        })
+        observers.append(nc.addObserver(
+            forName: AVCaptureSession.runtimeErrorNotification,
+            object: session,
+            queue: .main
+        ) { note in
+            #if DEBUG
+            let err = note.userInfo?[AVCaptureSessionErrorKey]
+            print("[PPGCapture] session RUNTIME ERROR · \(String(describing: err))")
+            #endif
+        })
+    }
+
+    deinit {
+        for o in observers { NotificationCenter.default.removeObserver(o) }
+    }
+
+    #if DEBUG
+    private static func interruptionReasonName(_ raw: Int) -> String {
+        switch raw {
+        case 1: return "videoDeviceNotAvailableInBackground"
+        case 2: return "audioDeviceInUseByAnotherClient"
+        case 3: return "videoDeviceInUseByAnotherClient"
+        case 4: return "videoDeviceNotAvailableWithMultipleForegroundApps"
+        case 5: return "videoDeviceNotAvailableDueToSystemPressure"
+        default: return "unknown"
+        }
+    }
+    #endif
 
     /// Start a capture. Returns once the session is running with the
     /// torch on, or throws if the camera or torch is unavailable.
@@ -72,32 +141,136 @@ final class PPGCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         session.commitConfiguration()
 
         // Pin to 30 fps so the signal processor's assumed sampleRateHz
-        // matches reality. Has to be set on the device, not the session.
+        // matches reality. We leave exposure and white balance at
+        // their iOS defaults · the R/G ratio detector is immune to
+        // gain changes (both channels move together), and explicitly
+        // setting auto-expose modes was destabilising the torch on
+        // user's device.
         do {
             try dev.lockForConfiguration()
             let target = CMTime(value: 1, timescale: 30)
             dev.activeVideoMinFrameDuration = target
             dev.activeVideoMaxFrameDuration = target
-            if dev.isExposureModeSupported(.continuousAutoExposure) {
-                dev.exposureMode = .continuousAutoExposure
-            }
-            // Torch on at ~50% · enough to illuminate the finger, not
-            // so bright that the AGC clips the signal into saturation.
-            if dev.isTorchModeSupported(.on) {
-                try dev.setTorchModeOn(level: 0.5)
-            }
             dev.unlockForConfiguration()
         } catch {
-            throw StartError.configurationFailed("Could not configure torch / fps: \(error.localizedDescription)")
+            throw StartError.configurationFailed("Could not configure fps: \(error.localizedDescription)")
         }
 
         await Task.detached(priority: .userInitiated) { [session] in
             session.startRunning()
         }.value
+
+        // Wait for the session to actually be running before we touch
+        // the torch · `startRunning` returns synchronously but the
+        // underlying media pipeline takes a beat to come up, and on
+        // some devices touching the torch before it is ready leaves
+        // torchMode=on but isTorchActive=false (set silently dropped).
+        var waited: TimeInterval = 0
+        while !session.isRunning, waited < 2.0 {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+            waited += 0.1
+        }
+        // Extra settling beat even after isRunning · the media pipeline
+        // can be running for frame delivery before it accepts torch
+        // commands reliably.
+        try? await Task.sleep(nanoseconds: 200_000_000)
+
+        // Torch on, at half brightness. iOS has a per-device per-time
+        // torch power budget · running at max (torchMode = .on, level
+        // 1.0) drains it within seconds on some devices, after which
+        // iOS refuses to re-arm. Half power runs cooler and stays
+        // within budget for the full 30s capture on more devices.
+        // Each attempt verifies that iOS actually activated the LED
+        // and retries if not. Falls back to .on (max level) if the
+        // level-based API fails outright.
+        #if DEBUG
+        print("[PPGCapture] pre-torch · hasTorch=\(dev.hasTorch) isTorchAvailable=\(dev.isTorchAvailable) supportsOn=\(dev.isTorchModeSupported(.on)) isTorchActive=\(dev.isTorchActive)")
+        #endif
+        var torchActivated = false
+        for attempt in 0..<3 {
+            do {
+                try dev.lockForConfiguration()
+                if dev.hasTorch, dev.isTorchAvailable {
+                    do {
+                        try dev.setTorchModeOn(level: 0.5)
+                    } catch {
+                        if dev.isTorchModeSupported(.on) {
+                            dev.torchMode = .on
+                        }
+                    }
+                }
+                dev.unlockForConfiguration()
+            } catch {
+                throw StartError.configurationFailed("Could not turn on the torch: \(error.localizedDescription)")
+            }
+            // Give iOS up to 300ms to actually flip the LED on.
+            for _ in 0..<3 {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                if dev.isTorchActive { break }
+            }
+            if dev.isTorchActive {
+                torchActivated = true
+                #if DEBUG
+                print("[PPGCapture] post-torch · attempt=\(attempt) torchMode=\(dev.torchMode.rawValue) isTorchActive=true torchLevel=\(dev.torchLevel)")
+                #endif
+                break
+            }
+            #if DEBUG
+            print("[PPGCapture] post-torch · attempt=\(attempt) torchMode=\(dev.torchMode.rawValue) isTorchActive=false torchLevel=\(dev.torchLevel) · retrying")
+            #endif
+        }
+        if !torchActivated {
+            throw StartError.configurationFailed("The flashlight would not turn on. Close other apps that might be using the camera, then try again.")
+        }
+
+        startTorchKeeper()
+    }
+
+    /// Background loop that re-arms the torch when iOS turns it off
+    /// mid-capture. Polls `isTorchActive` once a second; if iOS has
+    /// dropped it, locks the device and sets torchMode = .on again.
+    /// Stopped explicitly in `stop()` so the torch goes off when the
+    /// measurement ends.
+    private func startTorchKeeper() {
+        torchKeeperTask?.cancel()
+        torchKeeperTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard let self else { return }
+                self.rearmTorchIfNeeded()
+            }
+        }
+    }
+
+    private func rearmTorchIfNeeded() {
+        guard let dev = device else { return }
+        guard dev.hasTorch, dev.isTorchAvailable else { return }
+        if dev.isTorchActive { return }
+        do {
+            try dev.lockForConfiguration()
+            // Re-arm at half power to match the start configuration ·
+            // see comment on the initial torch setup for the budget
+            // reasoning.
+            do {
+                try dev.setTorchModeOn(level: 0.5)
+            } catch {
+                if dev.isTorchModeSupported(.on) {
+                    dev.torchMode = .on
+                }
+            }
+            dev.unlockForConfiguration()
+            #if DEBUG
+            print("[PPGCapture] torch re-armed · isTorchActive=\(dev.isTorchActive) torchLevel=\(dev.torchLevel)")
+            #endif
+        } catch {
+            // Best-effort. If we can't lock, try again on the next tick.
+        }
     }
 
     /// Stop the session and turn the torch off. Idempotent.
     func stop() {
+        torchKeeperTask?.cancel()
+        torchKeeperTask = nil
         if session.isRunning { session.stopRunning() }
         if let dev = device {
             try? dev.lockForConfiguration()
@@ -116,21 +289,21 @@ final class PPGCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         from connection: AVCaptureConnection
     ) {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-        let green = Self.meanGreenInCenterROI(pixelBuffer)
+        let (green, red) = Self.meanGreenRedInCenterROI(pixelBuffer)
         guard let handler = onFrame else { return }
         Task { @MainActor in
-            handler(green)
+            handler(green, red)
         }
     }
 
-    /// Average the green byte across a 200x200 centred ROI. Returns 0
-    /// if locking the pixel buffer fails · the signal processor's
-    /// finger-detector will mark that as "no finger" rather than a peak.
-    static func meanGreenInCenterROI(_ pixelBuffer: CVPixelBuffer) -> Double {
+    /// Average the green and red bytes across a 200x200 centred ROI.
+    /// Returns (0, 0) if locking the pixel buffer fails · the signal
+    /// processor's finger-detector will mark that as "no finger."
+    static func meanGreenRedInCenterROI(_ pixelBuffer: CVPixelBuffer) -> (green: Double, red: Double) {
         CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
 
-        guard let base = CVPixelBufferGetBaseAddress(pixelBuffer) else { return 0 }
+        guard let base = CVPixelBufferGetBaseAddress(pixelBuffer) else { return (0, 0) }
         let width = CVPixelBufferGetWidth(pixelBuffer)
         let height = CVPixelBufferGetHeight(pixelBuffer)
         let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
@@ -140,17 +313,19 @@ final class PPGCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         let startY = (height - roiH) / 2
 
         let buffer = base.assumingMemoryBound(to: UInt8.self)
-        var sum: UInt64 = 0
+        var sumG: UInt64 = 0
+        var sumR: UInt64 = 0
         var count: UInt64 = 0
         for y in startY..<(startY + roiH) {
             let row = buffer.advanced(by: y * bytesPerRow)
             for x in startX..<(startX + roiW) {
-                // BGRA layout · green is byte index 1 in each pixel.
-                sum &+= UInt64(row[x * 4 + 1])
+                // BGRA layout · blue=0, green=1, red=2, alpha=3.
+                sumG &+= UInt64(row[x * 4 + 1])
+                sumR &+= UInt64(row[x * 4 + 2])
                 count &+= 1
             }
         }
-        guard count > 0 else { return 0 }
-        return Double(sum) / Double(count)
+        guard count > 0 else { return (0, 0) }
+        return (Double(sumG) / Double(count), Double(sumR) / Double(count))
     }
 }

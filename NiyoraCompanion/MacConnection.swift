@@ -100,12 +100,21 @@ actor MacConnection {
             startContinuation = nil
             messageStreamContinuation?.finish(throwing: err)
             messageStreamContinuation = nil
+            connection.cancel()
         case .waiting(let error):
-            // .waiting is normal on local networks while the OS prompts
-            // for permission. Surface it once so the UI can show a hint.
+            // .waiting means NWConnection can't connect right now and
+            // will keep retrying on its own. For our use case (the Mac
+            // is either listening or it isn't), an indefinite retry
+            // loop floods the kernel with TCP SYN/RST pairs and adds
+            // background load while the camera is trying to come up.
+            // Surface as an error AND cancel the underlying connection
+            // so it stops retrying. The user can reconnect explicitly.
             let err = ConnectionError.waiting(error)
+            startContinuation?.resume(throwing: err)
+            startContinuation = nil
             messageStreamContinuation?.finish(throwing: err)
             messageStreamContinuation = nil
+            connection.cancel()
         case .cancelled:
             messageStreamContinuation?.finish()
             messageStreamContinuation = nil

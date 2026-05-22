@@ -24,14 +24,17 @@ final class PairingFlow {
         case failed(reason: String)
     }
 
-    /// One measurement the Mac has asked us to take. The view layer
-    /// reads this to decide whether to present the sheet, and clears it
-    /// once the result has been sent back (or the sheet is dismissed).
+    /// One measurement the sheet should drive. Either Mac-initiated
+    /// (user tapped Measure on the Mac · phase is pre or post) or
+    /// phone-initiated (user tapped the Measure button on this app ·
+    /// `isStandalone` is true, phase defaults to .post, sessionId is
+    /// minted on this device).
     struct PendingRequest: Equatable, Identifiable {
         var id: String { "\(sessionId):\(phase.rawValue)" }
         let sessionId: String
         let phase: MeasurementPhase
         let techniqueName: String
+        let isStandalone: Bool
     }
 
     var state: State = .idle
@@ -56,6 +59,21 @@ final class PairingFlow {
             serverName: payload.serverName,
             secret: Hex.decode(payload.secretHex),
             pairingId: payload.pairingId
+        )
+    }
+
+    /// User tapped the Measure button on this iPhone. Mints a new
+    /// session_id locally, drives the same MeasurementSheet path the
+    /// Mac would, and the resulting hrv_result flows back to the Mac
+    /// (or sits in the local queue if not connected · see
+    /// LocalMeasurementStore for the drain logic).
+    func startStandaloneMeasurement() {
+        let id = UUID().uuidString
+        pendingRequest = PendingRequest(
+            sessionId: id,
+            phase: .post,
+            techniqueName: "",
+            isStandalone: true
         )
     }
 
@@ -99,16 +117,70 @@ final class PairingFlow {
             snrDb: result.snrDb,
             status: result.status
         )
-        do {
-            try await connection?.send(message)
-        } catch {
-            // Connection drop is fine · the Mac will request the same
-            // measurement again next time the phone reconnects (queue
-            // replay), and the seenRequests cache resets on disconnect.
+        var delivered = false
+        if let conn = connection {
+            do {
+                try await conn.send(message)
+                delivered = true
+            } catch {
+                // Fall through to the local queue.
+            }
+        }
+        if delivered {
+            // While we have a live link, try to push any older results
+            // that have been sitting in the queue. Cheap if empty.
+            await drainLocalQueue()
+        } else {
+            // Either the phone isn't connected, or send threw. Stash
+            // the result so the next reconnect can drain it.
+            LocalMeasurementStore.enqueue(LocalMeasurementStore.Pending(
+                sessionId: sessionId,
+                phase: phase.rawValue,
+                rmssdMs: result.rmssdMs,
+                sdnnMs: result.sdnnMs,
+                sampleCount: result.sampleCount,
+                snrDb: result.snrDb,
+                status: result.status.rawValue,
+                queuedAtIso: ISO8601DateFormatter().string(from: Date())
+            ))
         }
         pendingRequest = nil
         if case let .measuring(name, _, _) = state {
             state = .paired(serverName: name)
+        }
+    }
+
+    /// Drain queued measurement results to the Mac. Called every time
+    /// the flow reaches a paired state (fresh pair, reconnect, or
+    /// post-measurement settle). No-op if the queue is empty.
+    private func drainLocalQueue() async {
+        let pending = LocalMeasurementStore.load()
+        guard !pending.isEmpty, let conn = connection else { return }
+        for entry in pending {
+            guard let phase = MeasurementPhase(rawValue: entry.phase) else {
+                LocalMeasurementStore.remove(sessionId: entry.sessionId, phase: entry.phase)
+                continue
+            }
+            guard let status = HrvResultStatus(rawValue: entry.status) else {
+                LocalMeasurementStore.remove(sessionId: entry.sessionId, phase: entry.phase)
+                continue
+            }
+            let msg = ClientMessage.hrvResult(
+                sessionId: entry.sessionId,
+                phase: phase,
+                rmssdMs: entry.rmssdMs,
+                sdnnMs: entry.sdnnMs,
+                sampleCount: entry.sampleCount,
+                snrDb: entry.snrDb,
+                status: status
+            )
+            do {
+                try await conn.send(msg)
+                LocalMeasurementStore.remove(sessionId: entry.sessionId, phase: entry.phase)
+            } catch {
+                // Connection died mid-drain · leave the rest for next time.
+                return
+            }
         }
     }
 
@@ -244,6 +316,7 @@ final class PairingFlow {
                     port: port
                 ))
                 state = .paired(serverName: serverName)
+                await drainLocalQueue()
             case .authFailed(let reason):
                 state = .failed(reason: "Mac refused the pairing: \(reason)")
                 return
@@ -268,7 +341,8 @@ final class PairingFlow {
                     pendingRequest = PendingRequest(
                         sessionId: sessionId,
                         phase: phase,
-                        techniqueName: techniqueName
+                        techniqueName: techniqueName,
+                        isStandalone: false
                     )
                     state = .measuring(serverName: serverName, sessionId: sessionId, phase: phase)
                 default:

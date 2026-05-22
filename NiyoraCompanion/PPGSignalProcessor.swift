@@ -23,43 +23,67 @@ struct PPGSignalProcessor {
     /// session pins activeVideoMin/MaxFrameDuration to 1/30s).
     static let sampleRateHz: Double = 30.0
     /// Minimum number of IBIs needed to compute trustworthy HRV. With a
-    /// ~60 bpm baseline, 30s gives ~30 IBIs · we accept down to 10 to
-    /// allow for the first few seconds of stabilisation being dropped.
-    static let minIbiCount: Int = 10
-    /// Minimum SNR for an "ok" status, in dB. Below this we report
-    /// `low_signal` regardless of how many peaks we found.
-    static let minSnrDb: Double = 4.0
+    /// ~60 bpm baseline, 30s gives ~30 IBIs · we accept down to 8 to
+    /// tolerate the first second of stabilisation plus occasional
+    /// missed peaks. The post-hoc HR sanity gate (40-180 bpm) catches
+    /// any "8 beats in 30s = 16 bpm" mismeasures.
+    static let minIbiCount: Int = 8
+    /// Minimum SNR for an "ok" status, in dB. The crude estimator I
+    /// use is biased low for slow signals (sample-to-sample
+    /// differences are small even for clean pulses), so the threshold
+    /// is set generously. The physiologic-range gate below is the
+    /// stronger safeguard.
+    static let minSnrDb: Double = 2.0
 
     /// Raw per-frame mean green values, oldest first. Trimmed to the
-    /// window the caller passes when computing metrics.
+    /// window the caller passes when computing metrics. Green is the
+    /// PPG signal channel · the HRV math runs on this alone.
     private(set) var samples: [Double] = []
+    /// Per-frame mean red values, paired with `samples`. Used only by
+    /// the finger-on detector · the red-to-green ratio is a robust
+    /// signature of "finger on lens with torch on" (hemoglobin absorbs
+    /// green strongly, reflects red strongly, so R/G goes to 3-6×).
+    private(set) var redSamples: [Double] = []
 
-    /// Append a freshly measured green-channel mean. O(1).
-    mutating func append(_ greenMean: Double) {
-        samples.append(greenMean)
+    /// Append a freshly measured frame summary. O(1).
+    mutating func append(green: Double, red: Double) {
+        samples.append(green)
+        redSamples.append(red)
     }
 
     /// Drop the first `n` samples · the capture layer uses this to skip
     /// the first ~1s of stabilisation while the AGC and torch settle.
     mutating func dropFirst(_ n: Int) {
         guard n > 0 else { return }
-        samples.removeFirst(min(n, samples.count))
+        let drop = min(n, samples.count)
+        samples.removeFirst(drop)
+        let dropRed = min(n, redSamples.count)
+        redSamples.removeFirst(dropRed)
     }
 
     /// Whether the most recent window of samples looks like a finger is
-    /// on the lens. Heuristic: with a finger and the torch on, the green
-    /// channel sits in a narrow high-value band; without a finger it
-    /// either spans wildly or sits near zero. We check the last 0.5s.
+    /// on the lens with the torch on. The robust signal is the red-to-
+    /// green ratio · hemoglobin absorbs green light strongly and
+    /// reflects red strongly, so a finger + torch gives R/G of about
+    /// 3 to 6, while the camera looking at a normal scene gives R/G
+    /// around 0.8 to 1.2 (roughly balanced color). With a bright torch
+    /// the absorbed green can drop almost to zero, sending the ratio
+    /// into the hundreds · that is exactly the signal we want.
     func fingerLikelyOnLens() -> Bool {
         let lookback = Int(Self.sampleRateHz * 0.5)
-        guard samples.count >= lookback else { return false }
-        let tail = samples.suffix(lookback)
-        let mean = tail.reduce(0, +) / Double(tail.count)
-        let variance = tail.reduce(0.0) { acc, v in acc + (v - mean) * (v - mean) } / Double(tail.count)
-        let std = variance.squareRoot()
-        // Mean in a reasonable range, std not absurd. Numbers tuned for
-        // an 8-bit green channel (0..255) averaged over the ROI.
-        return mean > 60 && mean < 245 && std < 25
+        guard samples.count >= lookback,
+              redSamples.count >= lookback else { return false }
+        let g = samples.suffix(lookback).reduce(0, +) / Double(lookback)
+        let r = redSamples.suffix(lookback).reduce(0, +) / Double(lookback)
+        // Floor the denominator rather than rejecting low-green frames.
+        // When the torch is bright and a finger covers the lens green
+        // averages near 0 · that is the signal we want to keep, not
+        // discard as "too dark."
+        let safeG = max(g, 0.5)
+        let ratio = r / safeG
+        // r in [30, 252] rejects ambient (too dim) and saturated frames.
+        // No upper bound on g · with a finger on, it's tiny anyway.
+        return ratio > 2.0 && r > 30 && r < 252
     }
 
     /// Run the full pipeline against the current buffer and return the
@@ -67,6 +91,9 @@ struct PPGSignalProcessor {
     /// natural end (30s elapsed) from a finger-lifted abort.
     func computeResult(captureCompleted: Bool) -> PPGMeasurementResult {
         if !captureCompleted {
+            #if DEBUG
+            print("[PPGSignal] result=fingerLifted · capture aborted early")
+            #endif
             return PPGMeasurementResult(
                 rmssdMs: nil, sdnnMs: nil,
                 sampleCount: 0, snrDb: nil,
@@ -74,6 +101,9 @@ struct PPGSignalProcessor {
             )
         }
         guard samples.count >= Int(Self.sampleRateHz * 5) else {
+            #if DEBUG
+            print("[PPGSignal] result=lowSignal · only \(samples.count) samples (<5s worth)")
+            #endif
             return PPGMeasurementResult(
                 rmssdMs: nil, sdnnMs: nil,
                 sampleCount: 0, snrDb: nil,
@@ -84,10 +114,37 @@ struct PPGSignalProcessor {
         let detrended = detrend(samples, windowSeconds: 1.5)
         let filtered = bandpass(detrended)
         let peaks = detectPeaks(filtered)
-        let ibisMs = peakIntervalsMs(peaks)
+        let rawIbisMs = peakIntervalsMs(peaks)
+        // Drop IBIs that deviate more than 30% from the median ·
+        // standard HRV pre-processing. Catches the residue from
+        // any notch peaks that slipped past the refractory, plus
+        // motion or pressure artifacts.
+        let ibisMs = rejectIbiOutliers(rawIbisMs)
         let snr = estimateSnrDb(filtered)
+        let meanIbiMs = ibisMs.isEmpty ? 0 : ibisMs.reduce(0, +) / Double(ibisMs.count)
+        let heartRateBpm = meanIbiMs > 0 ? 60_000.0 / meanIbiMs : 0
+        let rmssdValue = rmssd(ibisMs) ?? 0
+        let sdnnValue = sdnn(ibisMs) ?? 0
 
-        guard ibisMs.count >= Self.minIbiCount, snr >= Self.minSnrDb else {
+        #if DEBUG
+        print("[PPGSignal] samples=\(samples.count) peaks=\(peaks.count) ibis=\(ibisMs.count)/\(rawIbisMs.count) snrDb=\(String(format: "%.2f", snr)) hrBpm=\(String(format: "%.1f", heartRateBpm)) rmssdMs=\(String(format: "%.1f", rmssdValue)) sdnnMs=\(String(format: "%.1f", sdnnValue))")
+        #endif
+
+        guard ibisMs.count >= Self.minIbiCount else {
+            #if DEBUG
+            print("[PPGSignal] result=lowSignal · too few IBIs (\(ibisMs.count) < \(Self.minIbiCount))")
+            #endif
+            return PPGMeasurementResult(
+                rmssdMs: nil, sdnnMs: nil,
+                sampleCount: UInt32(ibisMs.count),
+                snrDb: snr,
+                status: .lowSignal
+            )
+        }
+        guard snr >= Self.minSnrDb else {
+            #if DEBUG
+            print("[PPGSignal] result=lowSignal · SNR \(String(format: "%.2f", snr)) < \(Self.minSnrDb)")
+            #endif
             return PPGMeasurementResult(
                 rmssdMs: nil, sdnnMs: nil,
                 sampleCount: UInt32(ibisMs.count),
@@ -96,6 +153,28 @@ struct PPGSignalProcessor {
             )
         }
 
+        // Physiologic sanity. Without these guards a no-finger capture
+        // can sneak through with garbage values (RMSSD ~1400 ms, HR
+        // ~20 bpm), because the peak detector is finding random local
+        // maxima in noise. Reject anything outside what a human body
+        // could plausibly produce.
+        let humanLikelyHr = heartRateBpm >= 40 && heartRateBpm <= 180
+        let humanLikelyRmssd = rmssdValue >= 5 && rmssdValue <= 250
+        guard humanLikelyHr, humanLikelyRmssd else {
+            #if DEBUG
+            print("[PPGSignal] result=lowSignal · HR \(String(format: "%.1f", heartRateBpm)) or RMSSD \(String(format: "%.1f", rmssdValue)) outside physiologic range")
+            #endif
+            return PPGMeasurementResult(
+                rmssdMs: nil, sdnnMs: nil,
+                sampleCount: UInt32(ibisMs.count),
+                snrDb: snr,
+                status: .lowSignal
+            )
+        }
+
+        #if DEBUG
+        print("[PPGSignal] result=ok")
+        #endif
         return PPGMeasurementResult(
             rmssdMs: rmssd(ibisMs),
             sdnnMs: sdnn(ibisMs),
@@ -165,11 +244,16 @@ struct PPGSignalProcessor {
         return out
     }
 
-    /// Peak picker with a 250 ms refractory (max ~240 bpm). Returns
-    /// peak indices in the filtered signal.
+    /// Peak picker with a 350 ms refractory (max ~170 bpm). Returns
+    /// peak indices in the filtered signal. The refractory is set
+    /// above 300 ms deliberately · PPG waveforms have a dicrotic
+    /// notch ~250-300 ms after each systolic peak, and a shorter
+    /// refractory picks them up as separate beats. The cost is that
+    /// HR > 170 bpm is not detectable, which is fine for resting /
+    /// light-activity contexts.
     func detectPeaks(_ x: [Double]) -> [Int] {
         guard x.count > 4 else { return [] }
-        let refractorySamples = Int(0.25 * Self.sampleRateHz)
+        let refractorySamples = Int(0.35 * Self.sampleRateHz)
         // Adaptive threshold: a fraction of the rolling max so the
         // detector tracks slow amplitude changes (e.g. finger pressure).
         let windowSamples = Int(2.0 * Self.sampleRateHz)
@@ -201,6 +285,21 @@ struct PPGSignalProcessor {
             out.append(dtSamples / Self.sampleRateHz * 1000.0)
         }
         return out
+    }
+
+    /// Drop IBIs that fall more than 30% outside the median. Standard
+    /// HRV preprocessing · the median is robust to outliers (where the
+    /// mean is not), and ±30% covers normal sinus arrhythmia (the
+    /// breath-to-breath HR variation we actually want to measure)
+    /// while rejecting notch-peak artifacts and motion-induced
+    /// double-counts that the peak detector lets through.
+    func rejectIbiOutliers(_ ibis: [Double]) -> [Double] {
+        guard ibis.count >= 5 else { return ibis }
+        let sorted = ibis.sorted()
+        let median = sorted[sorted.count / 2]
+        let lower = median * 0.7
+        let upper = median * 1.3
+        return ibis.filter { $0 >= lower && $0 <= upper }
     }
 
     /// Root-mean-square of successive differences, in ms.

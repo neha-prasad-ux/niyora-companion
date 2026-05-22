@@ -8,9 +8,11 @@ import UIKit
 /// Lifecycle:
 ///
 ///   sheet appears → start()
-///       → state = .preparing                 (camera coming up)
-///       → state = .capturing(elapsed: 0..30) (per-frame updates)
-///       → state = .finished(result)          OR .failed(reason)
+///       → state = .preparing                   (camera coming up)
+///       → state = .placingFinger               (camera ready, waiting on user)
+///       → state = .readyCountdown(remaining)   (finger on, 2s settling pause)
+///       → state = .capturing(elapsed: 0..30)   (per-frame updates)
+///       → state = .finished(result)            OR .failed(reason)
 ///   sheet dismissed → cancel()
 @MainActor
 @Observable
@@ -19,70 +21,74 @@ final class MeasurementController {
     enum State: Equatable {
         case idle
         case preparing
+        case placingFinger
+        case readyCountdown(remaining: Double)
         case capturing(elapsed: Double)
         case finished(PPGMeasurementResult)
         case failed(String)
     }
 
-    /// How long a measurement lasts, in seconds. Locked at 30s per the
-    /// spec · 30s gives enough IBIs for RMSSD without making the user
-    /// hold their finger uncomfortably long.
+    /// How long a capture lasts, in seconds. Locked at 30s per the spec.
     static let captureDurationSec: Double = 30.0
-    /// We discard the first second or so of samples so the AGC + torch
-    /// settle. The signal processor still sees a 29s window for the
-    /// final compute · plenty for RMSSD.
+    /// First seconds of the capture we discard so AGC + torch settle.
     private static let warmupDurationSec: Double = 1.5
+    /// Pause between "finger placed" and "capture starts" so the user
+    /// can settle in. Short, so it doesn't feel like a delay.
+    private static let readyCountdownSec: Double = 2.0
 
     let sessionId: String
     let phase: MeasurementPhase
     let techniqueName: String
+    /// True when the phone initiated the measurement itself (no Mac
+    /// request frame in flight). The result still flows to the Mac on
+    /// the same wire if paired, but the UI shouldn't say "after breath."
+    let isStandalone: Bool
 
     private(set) var state: State = .idle
-    /// Latest filtered signal slice for the waveform preview. Most-recent
-    /// ~5s of bandpassed samples, downsampled to ~60 points for the SVG.
     private(set) var previewSignal: [Double] = []
-    /// Whether the latest 0.5s of samples looks like a finger is on the
-    /// lens. UI uses this to render the "finger on lens" hint.
     private(set) var fingerOnLens: Bool = false
+    /// Computed beats-per-minute over the last few seconds of capture,
+    /// for the result screen. Nil until the result is finalized.
+    private(set) var heartRateBpm: Double? = nil
 
-    private let capture = PPGCapture()
+    let capture = PPGCapture()
     private var processor = PPGSignalProcessor()
-    private var startedAt: Date?
+    private var captureStartedAt: Date?
     private var tickTask: Task<Void, Never>?
-    /// Counts contiguous frames where the finger-on detector says
-    /// "no finger". If this stays high for over a second mid-capture
-    /// we abort with `.fingerLifted` rather than producing junk metrics.
     private var noFingerStreakFrames = 0
+    private let haptics = UIImpactFeedbackGenerator(style: .medium)
+    private let successHaptic = UINotificationFeedbackGenerator()
 
-    init(sessionId: String, phase: MeasurementPhase, techniqueName: String) {
+    init(
+        sessionId: String,
+        phase: MeasurementPhase,
+        techniqueName: String,
+        isStandalone: Bool = false
+    ) {
         self.sessionId = sessionId
         self.phase = phase
         self.techniqueName = techniqueName
+        self.isStandalone = isStandalone
     }
 
-    /// Begin the capture. Idempotent · a second call while running is a
-    /// no-op. Errors during camera setup transition to `.failed`.
     func start() async {
         guard case .idle = state else { return }
         state = .preparing
         do {
-            try await capture.start { [weak self] green in
-                self?.onFrame(greenMean: green)
+            try await capture.start { [weak self] green, red in
+                self?.onFrame(green: green, red: red)
             }
         } catch {
             state = .failed(friendlyStartError(error))
             return
         }
-        startedAt = Date()
-        state = .capturing(elapsed: 0)
-        // Keep the screen awake while the user is asked to hold still.
+        state = .placingFinger
         UIApplication.shared.isIdleTimerDisabled = true
+        haptics.prepare()
+        successHaptic.prepare()
         scheduleTick()
     }
 
-    /// Cancel an in-progress capture (sheet dismissed). Sends a
-    /// `cancelled`-status result back via the completion callback so
-    /// the Mac can prune the queued request.
     func cancel() {
         tickTask?.cancel()
         tickTask = nil
@@ -97,38 +103,60 @@ final class MeasurementController {
         ))
     }
 
-    // MARK: - Frame ingestion
-
-    private nonisolated func onFrame(greenMean: Double) {
-        // The capture callback already hops to the main actor before
-        // calling us; this nonisolated wrapper is just the closure
-        // signature seen by AVFoundation.
+    private nonisolated func onFrame(green: Double, red: Double) {
         Task { @MainActor [weak self] in
-            self?.appendFrame(greenMean: greenMean)
+            self?.appendFrame(green: green, red: red)
         }
     }
 
-    private func appendFrame(greenMean: Double) {
-        guard case .capturing = state else { return }
-        processor.append(greenMean)
-        fingerOnLens = processor.fingerLikelyOnLens()
-        if fingerOnLens {
-            noFingerStreakFrames = 0
-        } else {
-            noFingerStreakFrames += 1
-        }
-        // 30 fps · 1s contiguous = 30 frames. Allow a few before aborting
-        // so a brief jitter doesn't kill the capture.
-        let elapsed = startedAt.map { Date().timeIntervalSince($0) } ?? 0
-        if elapsed > Self.warmupDurationSec, noFingerStreakFrames > Int(PPGSignalProcessor.sampleRateHz * 1.5) {
-            finalize(captureCompleted: false)
+    private func appendFrame(green: Double, red: Double) {
+        switch state {
+        case .placingFinger, .readyCountdown, .capturing:
+            processor.append(green: green, red: red)
+        default:
             return
         }
-        refreshPreview()
+        fingerOnLens = processor.fingerLikelyOnLens()
+        #if DEBUG
+        if case .placingFinger = state, processor.samples.count % 15 == 0 {
+            print("[MeasureCtrl] frame · green=\(String(format: "%.1f", green)) red=\(String(format: "%.1f", red)) ratio=\(green > 0 ? String(format: "%.2f", red / green) : "n/a") fingerOnLens=\(fingerOnLens)")
+        }
+        #endif
+
+        switch state {
+        case .placingFinger:
+            // Transition to readyCountdown when a finger is detected.
+            if fingerOnLens {
+                haptics.impactOccurred()
+                state = .readyCountdown(remaining: Self.readyCountdownSec)
+            }
+        case .readyCountdown(let remaining):
+            // If finger lifts during the ready pause, go back.
+            if !fingerOnLens {
+                state = .placingFinger
+                return
+            }
+            // Countdown decrements via the tick task. Don't recompute
+            // here; just track the streak.
+            _ = remaining
+        case .capturing:
+            if fingerOnLens {
+                noFingerStreakFrames = 0
+            } else {
+                noFingerStreakFrames += 1
+            }
+            let elapsed = captureStartedAt.map { Date().timeIntervalSince($0) } ?? 0
+            if elapsed > Self.warmupDurationSec,
+               noFingerStreakFrames > Int(PPGSignalProcessor.sampleRateHz * 1.5) {
+                finalize(captureCompleted: false)
+                return
+            }
+            refreshPreview()
+        default:
+            break
+        }
     }
 
-    /// Build the waveform preview from the most recent ~5s of samples.
-    /// Cheap · we bandpass only the tail and downsample to ~60 points.
     private func refreshPreview() {
         let tailSec = 5.0
         let tailCount = Int(tailSec * PPGSignalProcessor.sampleRateHz)
@@ -139,7 +167,6 @@ final class MeasurementController {
         let tail = Array(processor.samples.suffix(tailCount))
         let detrended = processor.detrend(tail, windowSeconds: 1.0)
         let bandpassed = processor.bandpass(detrended)
-        // Downsample to ~60 points so the SwiftUI Canvas renders smoothly.
         let target = 60
         if bandpassed.count <= target {
             previewSignal = bandpassed
@@ -154,24 +181,39 @@ final class MeasurementController {
         }
     }
 
-    // MARK: - Tick + finalize
-
     private func scheduleTick() {
         tickTask?.cancel()
         tickTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 100_000_000)
                 guard let self else { return }
-                guard let started = self.startedAt else { return }
-                let elapsed = Date().timeIntervalSince(started)
-                if case .capturing = self.state {
-                    self.state = .capturing(elapsed: min(elapsed, Self.captureDurationSec))
-                }
-                if elapsed >= Self.captureDurationSec {
-                    self.finalize(captureCompleted: true)
-                    return
-                }
+                self.tickOnce()
+                if case .finished = self.state { return }
+                if case .failed = self.state { return }
             }
+        }
+    }
+
+    private func tickOnce() {
+        switch state {
+        case .readyCountdown(let remaining):
+            let next = remaining - 0.1
+            if next <= 0 {
+                state = .capturing(elapsed: 0)
+                captureStartedAt = Date()
+                haptics.impactOccurred()
+            } else {
+                state = .readyCountdown(remaining: next)
+            }
+        case .capturing:
+            guard let started = captureStartedAt else { return }
+            let elapsed = Date().timeIntervalSince(started)
+            state = .capturing(elapsed: min(elapsed, Self.captureDurationSec))
+            if elapsed >= Self.captureDurationSec {
+                finalize(captureCompleted: true)
+            }
+        default:
+            break
         }
     }
 
@@ -181,14 +223,26 @@ final class MeasurementController {
         capture.stop()
         UIApplication.shared.isIdleTimerDisabled = false
 
-        // Drop the warmup samples before compute. The signal processor's
-        // own `dropFirst` mutates the buffer, but we want the live
-        // preview unaltered during the capture · so we apply the drop
-        // on a copy.
         var finalProcessor = processor
         let warmupSamples = Int(Self.warmupDurationSec * PPGSignalProcessor.sampleRateHz)
         finalProcessor.dropFirst(warmupSamples)
         let result = finalProcessor.computeResult(captureCompleted: captureCompleted)
+        // Heart rate from the same IBI list · convenience for the
+        // result screen, not sent to the Mac in v1.
+        if result.status == .ok {
+            let bandpassed = finalProcessor.bandpass(
+                finalProcessor.detrend(finalProcessor.samples, windowSeconds: 1.5)
+            )
+            let peaks = finalProcessor.detectPeaks(bandpassed)
+            let ibis = finalProcessor.peakIntervalsMs(peaks)
+            if !ibis.isEmpty {
+                let meanMs = ibis.reduce(0, +) / Double(ibis.count)
+                heartRateBpm = 60_000.0 / meanMs
+            }
+            successHaptic.notificationOccurred(.success)
+        } else if result.status == .lowSignal || result.status == .fingerLifted {
+            successHaptic.notificationOccurred(.warning)
+        }
         state = .finished(result)
     }
 
