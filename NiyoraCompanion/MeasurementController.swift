@@ -51,7 +51,7 @@ final class MeasurementController {
     /// for the result screen. Nil until the result is finalized.
     private(set) var heartRateBpm: Double? = nil
 
-    private let capture = PPGCapture()
+    let capture = PPGCapture()
     private var processor = PPGSignalProcessor()
     private var captureStartedAt: Date?
     private var tickTask: Task<Void, Never>?

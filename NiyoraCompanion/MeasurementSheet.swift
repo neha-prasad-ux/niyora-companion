@@ -127,57 +127,55 @@ struct MeasurementSheet: View {
     }
 
     private var placingFingerView: some View {
-        VStack(spacing: 24) {
-            NiyoraOrb(size: 140, hue: 0.78, intensity: 0.7, pulseDuration: 4.0)
-                .opacity(0.85)
+        VStack(spacing: 28) {
+            // Live camera preview in a violet-tinted ring. The user
+            // sees the room until they cover the lens · once their
+            // finger is on it the preview goes dark red, which is
+            // the visual cue that they've found the right lens.
+            ZStack {
+                CameraPreview(session: controller.capture.session)
+                    .frame(width: 240, height: 240)
+                    .clipShape(Circle())
+                Circle()
+                    .stroke(
+                        LinearGradient(
+                            colors: [
+                                Color(hue: 0.78, saturation: 0.5, brightness: 0.85, opacity: 0.85),
+                                Color(hue: 0.78, saturation: 0.4, brightness: 0.55, opacity: 0.55),
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ),
+                        lineWidth: 4
+                    )
+                    .frame(width: 244, height: 244)
+                    .shadow(
+                        color: Color(hue: 0.78, saturation: 0.6, brightness: 0.5).opacity(0.45),
+                        radius: 18, x: 0, y: 0
+                    )
+                // Overlay tag · only visible while no finger detected.
+                if !controller.fingerOnLens {
+                    Text("No finger")
+                        .font(.system(size: 12, weight: .semibold))
+                        .tracking(2)
+                        .textCase(.uppercase)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 6)
+                        .background(.black.opacity(0.55), in: Capsule())
+                        .overlay(Capsule().stroke(Color.white.opacity(0.18), lineWidth: 1))
+                }
+            }
+
             VStack(spacing: 8) {
-                Text("Place your fingertip on the back camera")
+                Text("Place your finger on the camera")
                     .font(.system(size: 17, weight: .medium))
-                    .multilineTextAlignment(.center)
-                Text("Cover the camera and flashlight firmly. Hold steady.")
-                    .font(.system(size: 13, weight: .regular))
+                Text("Cover the lens firmly. Hold steady at heart level.")
+                    .font(.system(size: 13))
                     .foregroundStyle(.white.opacity(0.6))
                     .multilineTextAlignment(.center)
             }
             .padding(.horizontal, 24)
-            phoneBackGlyph
-                .padding(.top, 8)
-        }
-    }
-
-    /// Phone back-camera illustration: a soft phone outline with the
-    /// camera island highlighted. Matches Niyora's thin-stroke aesthetic.
-    private var phoneBackGlyph: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 32, style: .continuous)
-                .stroke(Color.white.opacity(0.42), lineWidth: 1.2)
-                .frame(width: 130, height: 178)
-            VStack {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(Color.white.opacity(0.5), lineWidth: 1.2)
-                    .frame(width: 74, height: 74)
-                    .overlay(
-                        HStack(spacing: 8) {
-                            ZStack {
-                                Circle()
-                                    .fill(Color.white)
-                                    .frame(width: 22, height: 22)
-                                Image(systemName: "arrow.left")
-                                    .font(.system(size: 11, weight: .bold))
-                                    .foregroundStyle(.black.opacity(0.55))
-                                    .offset(x: 22)
-                            }
-                            Spacer()
-                            Circle()
-                                .fill(Color.white.opacity(0.22))
-                                .frame(width: 18, height: 18)
-                        }
-                        .padding(12)
-                    )
-                Spacer()
-            }
-            .padding(.top, 14)
-            .frame(width: 130, height: 178)
         }
     }
 

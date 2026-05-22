@@ -26,7 +26,11 @@ final class PPGCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         case configurationFailed(String)
     }
 
-    private let session = AVCaptureSession()
+    /// The shared capture session · exposed (read-only is enforced by
+    /// the actor / single-writer pattern) so the sheet can show a live
+    /// preview during the place-finger stage. Same session that drives
+    /// the per-frame green-channel sampling.
+    let session = AVCaptureSession()
     private let output = AVCaptureVideoDataOutput()
     private let sampleQueue = DispatchQueue(label: "niyora.ppg.samples")
     private var device: AVCaptureDevice?
