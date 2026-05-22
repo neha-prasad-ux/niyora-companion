@@ -91,6 +91,9 @@ struct PPGSignalProcessor {
     /// natural end (30s elapsed) from a finger-lifted abort.
     func computeResult(captureCompleted: Bool) -> PPGMeasurementResult {
         if !captureCompleted {
+            #if DEBUG
+            print("[PPGSignal] result=fingerLifted · capture aborted early")
+            #endif
             return PPGMeasurementResult(
                 rmssdMs: nil, sdnnMs: nil,
                 sampleCount: 0, snrDb: nil,
@@ -98,6 +101,9 @@ struct PPGSignalProcessor {
             )
         }
         guard samples.count >= Int(Self.sampleRateHz * 5) else {
+            #if DEBUG
+            print("[PPGSignal] result=lowSignal · only \(samples.count) samples (<5s worth)")
+            #endif
             return PPGMeasurementResult(
                 rmssdMs: nil, sdnnMs: nil,
                 sampleCount: 0, snrDb: nil,
@@ -110,8 +116,30 @@ struct PPGSignalProcessor {
         let peaks = detectPeaks(filtered)
         let ibisMs = peakIntervalsMs(peaks)
         let snr = estimateSnrDb(filtered)
+        let meanIbiMs = ibisMs.isEmpty ? 0 : ibisMs.reduce(0, +) / Double(ibisMs.count)
+        let heartRateBpm = meanIbiMs > 0 ? 60_000.0 / meanIbiMs : 0
+        let rmssdValue = rmssd(ibisMs) ?? 0
+        let sdnnValue = sdnn(ibisMs) ?? 0
 
-        guard ibisMs.count >= Self.minIbiCount, snr >= Self.minSnrDb else {
+        #if DEBUG
+        print("[PPGSignal] samples=\(samples.count) peaks=\(peaks.count) ibis=\(ibisMs.count) snrDb=\(String(format: "%.2f", snr)) hrBpm=\(String(format: "%.1f", heartRateBpm)) rmssdMs=\(String(format: "%.1f", rmssdValue)) sdnnMs=\(String(format: "%.1f", sdnnValue))")
+        #endif
+
+        guard ibisMs.count >= Self.minIbiCount else {
+            #if DEBUG
+            print("[PPGSignal] result=lowSignal · too few IBIs (\(ibisMs.count) < \(Self.minIbiCount))")
+            #endif
+            return PPGMeasurementResult(
+                rmssdMs: nil, sdnnMs: nil,
+                sampleCount: UInt32(ibisMs.count),
+                snrDb: snr,
+                status: .lowSignal
+            )
+        }
+        guard snr >= Self.minSnrDb else {
+            #if DEBUG
+            print("[PPGSignal] result=lowSignal · SNR \(String(format: "%.2f", snr)) < \(Self.minSnrDb)")
+            #endif
             return PPGMeasurementResult(
                 rmssdMs: nil, sdnnMs: nil,
                 sampleCount: UInt32(ibisMs.count),
@@ -125,12 +153,12 @@ struct PPGSignalProcessor {
         // ~20 bpm), because the peak detector is finding random local
         // maxima in noise. Reject anything outside what a human body
         // could plausibly produce.
-        let meanIbiMs = ibisMs.reduce(0, +) / Double(ibisMs.count)
-        let heartRateBpm = meanIbiMs > 0 ? 60_000.0 / meanIbiMs : 0
-        let rmssdValue = rmssd(ibisMs) ?? 0
         let humanLikelyHr = heartRateBpm >= 40 && heartRateBpm <= 180
         let humanLikelyRmssd = rmssdValue >= 5 && rmssdValue <= 250
         guard humanLikelyHr, humanLikelyRmssd else {
+            #if DEBUG
+            print("[PPGSignal] result=lowSignal · HR \(String(format: "%.1f", heartRateBpm)) or RMSSD \(String(format: "%.1f", rmssdValue)) outside physiologic range")
+            #endif
             return PPGMeasurementResult(
                 rmssdMs: nil, sdnnMs: nil,
                 sampleCount: UInt32(ibisMs.count),
@@ -139,6 +167,9 @@ struct PPGSignalProcessor {
             )
         }
 
+        #if DEBUG
+        print("[PPGSignal] result=ok")
+        #endif
         return PPGMeasurementResult(
             rmssdMs: rmssd(ibisMs),
             sdnnMs: sdnn(ibisMs),
