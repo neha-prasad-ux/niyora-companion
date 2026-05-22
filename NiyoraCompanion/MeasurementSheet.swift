@@ -204,46 +204,62 @@ struct MeasurementSheet: View {
         let remaining = max(0, total - elapsed)
         let remainingSec = Int(remaining.rounded(.up))
         let progress = min(1.0, elapsed / total)
-        return VStack(spacing: 22) {
+        return VStack(spacing: 24) {
+            // Live camera preview stays visible so the user sees the
+            // red glow of their fingertip · with the countdown ring
+            // wrapped around it. Visual proof the capture is real and
+            // the finger is in the right place.
             ZStack {
-                NiyoraOrb(size: 200, hue: 0.78, intensity: 0.95, pulseDuration: 1.0)
-                Circle()
-                    .stroke(Color.white.opacity(0.08), lineWidth: 3)
+                CameraPreview(session: controller.capture.session)
                     .frame(width: 220, height: 220)
+                    .clipShape(Circle())
+                Circle()
+                    .stroke(Color.white.opacity(0.08), lineWidth: 5)
+                    .frame(width: 228, height: 228)
                 Circle()
                     .trim(from: 0, to: progress)
                     .stroke(
-                        Color.white.opacity(0.85),
-                        style: StrokeStyle(lineWidth: 3, lineCap: .round)
+                        LinearGradient(
+                            colors: [
+                                Color(hue: 0.78, saturation: 0.55, brightness: 0.95),
+                                Color(hue: 0.82, saturation: 0.5, brightness: 0.75),
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ),
+                        style: StrokeStyle(lineWidth: 5, lineCap: .round)
                     )
-                    .frame(width: 220, height: 220)
+                    .frame(width: 228, height: 228)
                     .rotationEffect(.degrees(-90))
                     .animation(.linear(duration: 0.1), value: progress)
                 VStack(spacing: 2) {
                     Text("\(remainingSec)")
-                        .font(.system(size: 56, weight: .light, design: .rounded))
+                        .font(.system(size: 52, weight: .semibold, design: .rounded))
                         .monospacedDigit()
+                        .foregroundStyle(.white)
+                        .shadow(color: .black.opacity(0.6), radius: 4, x: 0, y: 1)
                     Text("seconds")
                         .font(.system(size: 11, weight: .regular))
-                        .foregroundStyle(.white.opacity(0.5))
+                        .foregroundStyle(.white.opacity(0.85))
                         .tracking(2)
                         .textCase(.uppercase)
+                        .shadow(color: .black.opacity(0.6), radius: 3, x: 0, y: 1)
                 }
             }
             VStack(spacing: 6) {
                 Text("Reading your pulse")
-                    .font(.system(size: 16, weight: .medium))
+                    .font(.system(size: 17, weight: .medium))
                 Text(controller.fingerOnLens
-                    ? "Keep still. Don't lift your finger."
+                    ? "Keep still. Hold steady at heart level."
                     : "Press your finger more firmly over the lens.")
                     .font(.system(size: 13))
-                    .foregroundStyle(.white.opacity(0.65))
+                    .foregroundStyle(.white.opacity(0.7))
                     .multilineTextAlignment(.center)
             }
             .padding(.horizontal, 24)
             if controller.fingerOnLens {
                 WaveformView(samples: controller.previewSignal)
-                    .frame(height: 60)
+                    .frame(height: 56)
                     .padding(.horizontal, 16)
                     .opacity(0.85)
             }

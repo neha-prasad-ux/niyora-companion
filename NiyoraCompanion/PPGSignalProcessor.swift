@@ -23,12 +23,17 @@ struct PPGSignalProcessor {
     /// session pins activeVideoMin/MaxFrameDuration to 1/30s).
     static let sampleRateHz: Double = 30.0
     /// Minimum number of IBIs needed to compute trustworthy HRV. With a
-    /// ~60 bpm baseline, 30s gives ~30 IBIs · we accept down to 10 to
-    /// allow for the first few seconds of stabilisation being dropped.
-    static let minIbiCount: Int = 10
-    /// Minimum SNR for an "ok" status, in dB. Below this we report
-    /// `low_signal` regardless of how many peaks we found.
-    static let minSnrDb: Double = 4.0
+    /// ~60 bpm baseline, 30s gives ~30 IBIs · we accept down to 8 to
+    /// tolerate the first second of stabilisation plus occasional
+    /// missed peaks. The post-hoc HR sanity gate (40-180 bpm) catches
+    /// any "8 beats in 30s = 16 bpm" mismeasures.
+    static let minIbiCount: Int = 8
+    /// Minimum SNR for an "ok" status, in dB. The crude estimator I
+    /// use is biased low for slow signals (sample-to-sample
+    /// differences are small even for clean pulses), so the threshold
+    /// is set generously. The physiologic-range gate below is the
+    /// stronger safeguard.
+    static let minSnrDb: Double = 2.0
 
     /// Raw per-frame mean green values, oldest first. Trimmed to the
     /// window the caller passes when computing metrics.
@@ -57,18 +62,19 @@ struct PPGSignalProcessor {
     /// (std under ~6 units of 0-255), while the camera looking at any
     /// real scene shows micro-shake / scene change with std 10+.
     func fingerLikelyOnLens() -> Bool {
-        let lookback = Int(Self.sampleRateHz * 0.5)
+        let lookback = Int(Self.sampleRateHz * 0.7)
         guard samples.count >= lookback else { return false }
         let tail = samples.suffix(lookback)
         let mean = tail.reduce(0, +) / Double(tail.count)
         let variance = tail.reduce(0.0) { acc, v in acc + (v - mean) * (v - mean) } / Double(tail.count)
         let std = variance.squareRoot()
-        // Std is the primary signal · everything else is a sanity gate.
-        // Mean range is wide on purpose: dark skin under torch gives
-        // green ~15-25, light skin under torch gives green ~50-100,
-        // and we want both to pass. Above 220 is near-saturation
-        // (torch reflecting off a white surface, not a finger).
-        return std < 6.0 && mean > 12 && mean < 220
+        // Std is the primary signal. The previous threshold of 6 was
+        // tight enough that real pulse modulation (~3-5 units of swing
+        // on a 50-mean signal) plus camera noise (~2 units) pushed
+        // legitimate finger-on captures above 6 and the detector said
+        // "no finger." Raised to 12 · still well below the 20+ std a
+        // moving camera sees of a room.
+        return std < 12.0 && mean > 12 && mean < 220
     }
 
     /// Run the full pipeline against the current buffer and return the
