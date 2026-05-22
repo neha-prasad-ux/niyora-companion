@@ -155,43 +155,58 @@ final class PPGCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
             session.startRunning()
         }.value
 
-        // Some devices need a beat between session-running and the
-        // torch coming on · the AVCaptureSession is technically
-        // running when startRunning returns, but the underlying media
-        // pipeline isn't always immediately ready to actually drive
-        // the torch on iPhone 14/15/16 with adaptive true-tone flash.
-        try? await Task.sleep(nanoseconds: 250_000_000)
+        // Wait for the session to actually be running before we touch
+        // the torch · `startRunning` returns synchronously but the
+        // underlying media pipeline takes a beat to come up, and on
+        // some devices touching the torch before it is ready leaves
+        // torchMode=on but isTorchActive=false (set silently dropped).
+        var waited: TimeInterval = 0
+        while !session.isRunning, waited < 2.0 {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+            waited += 0.1
+        }
+        // Extra settling beat even after isRunning · the media pipeline
+        // can be running for frame delivery before it accepts torch
+        // commands reliably.
+        try? await Task.sleep(nanoseconds: 200_000_000)
 
-        // Torch on. `torchMode = .on` is the older, simpler property
-        // and seems to work on devices where setTorchModeOnWithLevel
-        // silently fails. We try the level variant first, fall back
-        // to `.on` only if it throws.
+        // Torch on, with up to 3 attempts. Each attempt sets the mode
+        // then verifies that iOS actually activated the LED · if it
+        // didn't, we wait briefly and retry. Use `.on` (max level) for
+        // the broadest device compatibility; `setTorchModeOn(level:)`
+        // silently failed on some devices.
         #if DEBUG
         print("[PPGCapture] pre-torch · hasTorch=\(dev.hasTorch) isTorchAvailable=\(dev.isTorchAvailable) supportsOn=\(dev.isTorchModeSupported(.on)) isTorchActive=\(dev.isTorchActive)")
         #endif
-        do {
-            try dev.lockForConfiguration()
-            if dev.hasTorch, dev.isTorchAvailable {
-                // 0.5 keeps the LED bright enough to illuminate the
-                // finger without saturating the camera sensor through
-                // the skin. Full brightness pushed the green channel
-                // above 220 on some skin types, which the finger-on
-                // detector then incorrectly rejected.
-                do {
-                    try dev.setTorchModeOn(level: 0.5)
-                } catch {
-                    // Fall back to the simpler API, which uses max level.
-                    if dev.isTorchModeSupported(.on) {
-                        dev.torchMode = .on
-                    }
+        var torchActivated = false
+        for attempt in 0..<3 {
+            do {
+                try dev.lockForConfiguration()
+                if dev.hasTorch, dev.isTorchAvailable, dev.isTorchModeSupported(.on) {
+                    dev.torchMode = .on
                 }
+                dev.unlockForConfiguration()
+            } catch {
+                throw StartError.configurationFailed("Could not turn on the torch: \(error.localizedDescription)")
             }
-            dev.unlockForConfiguration()
+            // Give iOS up to 300ms to actually flip the LED on.
+            for _ in 0..<3 {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                if dev.isTorchActive { break }
+            }
+            if dev.isTorchActive {
+                torchActivated = true
+                #if DEBUG
+                print("[PPGCapture] post-torch · attempt=\(attempt) torchMode=\(dev.torchMode.rawValue) isTorchActive=true torchLevel=\(dev.torchLevel)")
+                #endif
+                break
+            }
             #if DEBUG
-            print("[PPGCapture] post-torch · torchMode=\(dev.torchMode.rawValue) isTorchActive=\(dev.isTorchActive) torchLevel=\(dev.torchLevel)")
+            print("[PPGCapture] post-torch · attempt=\(attempt) torchMode=\(dev.torchMode.rawValue) isTorchActive=false torchLevel=\(dev.torchLevel) · retrying")
             #endif
-        } catch {
-            throw StartError.configurationFailed("Could not turn on the torch: \(error.localizedDescription)")
+        }
+        if !torchActivated {
+            throw StartError.configurationFailed("The flashlight would not turn on. Close other apps that might be using the camera, then try again.")
         }
     }
 
