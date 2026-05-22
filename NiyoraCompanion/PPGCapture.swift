@@ -78,27 +78,16 @@ final class PPGCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         session.commitConfiguration()
 
         // Pin to 30 fps so the signal processor's assumed sampleRateHz
-        // matches reality. We deliberately do NOT use continuous auto
-        // exposure or auto white balance during the capture · those
-        // adjust gain frame-to-frame, which the PPG pipeline reads as
-        // noise and the finger-on detector misreads as "no finger."
-        // `.autoExpose` triggers a one-shot exposure pass and then
-        // locks, which gives a stable baseline for the measurement.
+        // matches reality. We leave exposure and white balance at
+        // their iOS defaults · the R/G ratio detector is immune to
+        // gain changes (both channels move together), and explicitly
+        // setting auto-expose modes was destabilising the torch on
+        // user's device.
         do {
             try dev.lockForConfiguration()
             let target = CMTime(value: 1, timescale: 30)
             dev.activeVideoMinFrameDuration = target
             dev.activeVideoMaxFrameDuration = target
-            if dev.isExposureModeSupported(.autoExpose) {
-                dev.exposureMode = .autoExpose
-            } else if dev.isExposureModeSupported(.locked) {
-                dev.exposureMode = .locked
-            }
-            if dev.isWhiteBalanceModeSupported(.autoWhiteBalance) {
-                dev.whiteBalanceMode = .autoWhiteBalance
-            } else if dev.isWhiteBalanceModeSupported(.locked) {
-                dev.whiteBalanceMode = .locked
-            }
             dev.unlockForConfiguration()
         } catch {
             throw StartError.configurationFailed("Could not configure fps: \(error.localizedDescription)")
