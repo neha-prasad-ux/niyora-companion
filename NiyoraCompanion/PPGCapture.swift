@@ -76,17 +76,26 @@ final class PPGCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         session.commitConfiguration()
 
         // Pin to 30 fps so the signal processor's assumed sampleRateHz
-        // matches reality. Frame-rate config is fine pre-running, but
-        // torch is NOT · `setTorchModeOnWithLevel` only takes effect
-        // while the capture session is running, so it gets a second
-        // lockForConfiguration block after startRunning below.
+        // matches reality. We deliberately do NOT use continuous auto
+        // exposure or auto white balance during the capture · those
+        // adjust gain frame-to-frame, which the PPG pipeline reads as
+        // noise and the finger-on detector misreads as "no finger."
+        // `.autoExpose` triggers a one-shot exposure pass and then
+        // locks, which gives a stable baseline for the measurement.
         do {
             try dev.lockForConfiguration()
             let target = CMTime(value: 1, timescale: 30)
             dev.activeVideoMinFrameDuration = target
             dev.activeVideoMaxFrameDuration = target
-            if dev.isExposureModeSupported(.continuousAutoExposure) {
-                dev.exposureMode = .continuousAutoExposure
+            if dev.isExposureModeSupported(.autoExpose) {
+                dev.exposureMode = .autoExpose
+            } else if dev.isExposureModeSupported(.locked) {
+                dev.exposureMode = .locked
+            }
+            if dev.isWhiteBalanceModeSupported(.autoWhiteBalance) {
+                dev.whiteBalanceMode = .autoWhiteBalance
+            } else if dev.isWhiteBalanceModeSupported(.locked) {
+                dev.whiteBalanceMode = .locked
             }
             dev.unlockForConfiguration()
         } catch {
