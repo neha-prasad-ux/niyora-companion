@@ -117,6 +117,32 @@ struct ContentView: View {
 
     private func pairedState(known: [KnownServer]) -> some View {
         Form {
+            Section {
+                Button {
+                    flow.startStandaloneMeasurement()
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "heart.fill")
+                            .font(.title3)
+                            .foregroundStyle(.red)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Measure stress")
+                                .font(.headline)
+                            Text("30 second reading from your camera")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(.vertical, 6)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+
             Section("Paired Macs") {
                 ForEach(known) { server in
                     VStack(alignment: .leading, spacing: 6) {
@@ -130,6 +156,7 @@ struct ContentView: View {
                             Button("Unpair", role: .destructive) {
                                 KeychainStore.deleteSecret(forServerId: server.serverId)
                                 KnownServerStore.remove(serverId: server.serverId)
+                                LocalMeasurementStore.clear()
                                 flow.disconnect()
                             }
                             .buttonStyle(.bordered)
@@ -153,7 +180,7 @@ struct ContentView: View {
             }
 
             Section {
-                Text("Keep the app open to receive measurement requests. We turn on the camera and flashlight only while you're actively measuring.")
+                Text("Take a reading anytime by tapping Measure stress, or wait for your Mac to ask. Camera and flashlight are only on while you're measuring.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             } footer: {
@@ -200,7 +227,8 @@ struct ContentView: View {
                 let fresh = MeasurementController(
                     sessionId: request.sessionId,
                     phase: request.phase,
-                    techniqueName: request.techniqueName
+                    techniqueName: request.techniqueName,
+                    isStandalone: request.isStandalone
                 )
                 measurementController = fresh
                 Task { await fresh.start() }
@@ -236,7 +264,8 @@ struct ContentView: View {
         let fresh = MeasurementController(
             sessionId: request.sessionId,
             phase: request.phase,
-            techniqueName: request.techniqueName
+            techniqueName: request.techniqueName,
+            isStandalone: request.isStandalone
         )
         measurementController = fresh
         return fresh
