@@ -47,23 +47,28 @@ struct PPGSignalProcessor {
     }
 
     /// Whether the most recent window of samples looks like a finger is
-    /// on the lens. With the torch on (the only mode we support), a
-    /// finger on the lens produces a high-but-not-saturated green
-    /// channel · roughly 100..230 with low variance. No finger gives
-    /// either near-saturation (torch reflecting off nothing) or wide
-    /// swings (camera sees the room). We check the last 0.7s.
+    /// on the lens. With the torch on, hemoglobin absorbs the green
+    /// wavelength strongly · the reflected light is red-dominant and
+    /// the green channel reads LOW, not high. The earlier 100-230
+    /// range mistakenly excluded the actual finger-on case (green ~20-
+    /// 100 in real readings). The strong discriminator is the
+    /// time-domain stability of the signal · a steadily-placed finger
+    /// gives an extremely uniform frame-to-frame green-channel mean
+    /// (std under ~6 units of 0-255), while the camera looking at any
+    /// real scene shows micro-shake / scene change with std 10+.
     func fingerLikelyOnLens() -> Bool {
-        let lookback = Int(Self.sampleRateHz * 0.7)
+        let lookback = Int(Self.sampleRateHz * 0.5)
         guard samples.count >= lookback else { return false }
         let tail = samples.suffix(lookback)
         let mean = tail.reduce(0, +) / Double(tail.count)
         let variance = tail.reduce(0.0) { acc, v in acc + (v - mean) * (v - mean) } / Double(tail.count)
         let std = variance.squareRoot()
-        // Tightened band · the previous (60..245, std<25) range was
-        // loose enough that ambient light triggered false positives
-        // when the torch was off. With torch on these are the values
-        // you actually see from a finger.
-        return mean > 100 && mean < 230 && std < 18
+        // Std is the primary signal · everything else is a sanity gate.
+        // Mean range is wide on purpose: dark skin under torch gives
+        // green ~15-25, light skin under torch gives green ~50-100,
+        // and we want both to pass. Above 220 is near-saturation
+        // (torch reflecting off a white surface, not a finger).
+        return std < 6.0 && mean > 12 && mean < 220
     }
 
     /// Run the full pipeline against the current buffer and return the

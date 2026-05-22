@@ -22,18 +22,20 @@ struct MeasurementSheet: View {
             niyoraBackdrop
                 .ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                header
-                    .padding(.top, 18)
-                Spacer(minLength: 24)
-                content
-                    .frame(maxWidth: .infinity)
-                Spacer(minLength: 24)
-                footer
-                    .padding(.bottom, 28)
+            GeometryReader { proxy in
+                VStack(spacing: 0) {
+                    header
+                        .padding(.top, 8)
+                    Spacer(minLength: 12)
+                    content
+                        .frame(maxWidth: .infinity)
+                    Spacer(minLength: 12)
+                    footer
+                }
+                .padding(.horizontal, 28)
+                .padding(.bottom, max(20, proxy.safeAreaInsets.bottom + 4))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .padding(.horizontal, 28)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .foregroundStyle(.white)
 
             cancelChip
