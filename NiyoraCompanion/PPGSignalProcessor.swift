@@ -114,7 +114,12 @@ struct PPGSignalProcessor {
         let detrended = detrend(samples, windowSeconds: 1.5)
         let filtered = bandpass(detrended)
         let peaks = detectPeaks(filtered)
-        let ibisMs = peakIntervalsMs(peaks)
+        let rawIbisMs = peakIntervalsMs(peaks)
+        // Drop IBIs that deviate more than 30% from the median ·
+        // standard HRV pre-processing. Catches the residue from
+        // any notch peaks that slipped past the refractory, plus
+        // motion or pressure artifacts.
+        let ibisMs = rejectIbiOutliers(rawIbisMs)
         let snr = estimateSnrDb(filtered)
         let meanIbiMs = ibisMs.isEmpty ? 0 : ibisMs.reduce(0, +) / Double(ibisMs.count)
         let heartRateBpm = meanIbiMs > 0 ? 60_000.0 / meanIbiMs : 0
@@ -122,7 +127,7 @@ struct PPGSignalProcessor {
         let sdnnValue = sdnn(ibisMs) ?? 0
 
         #if DEBUG
-        print("[PPGSignal] samples=\(samples.count) peaks=\(peaks.count) ibis=\(ibisMs.count) snrDb=\(String(format: "%.2f", snr)) hrBpm=\(String(format: "%.1f", heartRateBpm)) rmssdMs=\(String(format: "%.1f", rmssdValue)) sdnnMs=\(String(format: "%.1f", sdnnValue))")
+        print("[PPGSignal] samples=\(samples.count) peaks=\(peaks.count) ibis=\(ibisMs.count)/\(rawIbisMs.count) snrDb=\(String(format: "%.2f", snr)) hrBpm=\(String(format: "%.1f", heartRateBpm)) rmssdMs=\(String(format: "%.1f", rmssdValue)) sdnnMs=\(String(format: "%.1f", sdnnValue))")
         #endif
 
         guard ibisMs.count >= Self.minIbiCount else {
@@ -239,11 +244,16 @@ struct PPGSignalProcessor {
         return out
     }
 
-    /// Peak picker with a 250 ms refractory (max ~240 bpm). Returns
-    /// peak indices in the filtered signal.
+    /// Peak picker with a 350 ms refractory (max ~170 bpm). Returns
+    /// peak indices in the filtered signal. The refractory is set
+    /// above 300 ms deliberately · PPG waveforms have a dicrotic
+    /// notch ~250-300 ms after each systolic peak, and a shorter
+    /// refractory picks them up as separate beats. The cost is that
+    /// HR > 170 bpm is not detectable, which is fine for resting /
+    /// light-activity contexts.
     func detectPeaks(_ x: [Double]) -> [Int] {
         guard x.count > 4 else { return [] }
-        let refractorySamples = Int(0.25 * Self.sampleRateHz)
+        let refractorySamples = Int(0.35 * Self.sampleRateHz)
         // Adaptive threshold: a fraction of the rolling max so the
         // detector tracks slow amplitude changes (e.g. finger pressure).
         let windowSamples = Int(2.0 * Self.sampleRateHz)
@@ -275,6 +285,21 @@ struct PPGSignalProcessor {
             out.append(dtSamples / Self.sampleRateHz * 1000.0)
         }
         return out
+    }
+
+    /// Drop IBIs that fall more than 30% outside the median. Standard
+    /// HRV preprocessing · the median is robust to outliers (where the
+    /// mean is not), and ±30% covers normal sinus arrhythmia (the
+    /// breath-to-breath HR variation we actually want to measure)
+    /// while rejecting notch-peak artifacts and motion-induced
+    /// double-counts that the peak detector lets through.
+    func rejectIbiOutliers(_ ibis: [Double]) -> [Double] {
+        guard ibis.count >= 5 else { return ibis }
+        let sorted = ibis.sorted()
+        let median = sorted[sorted.count / 2]
+        let lower = median * 0.7
+        let upper = median * 1.3
+        return ibis.filter { $0 >= lower && $0 <= upper }
     }
 
     /// Root-mean-square of successive differences, in ms.
