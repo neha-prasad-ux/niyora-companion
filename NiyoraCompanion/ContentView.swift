@@ -20,6 +20,7 @@ struct ContentView: View {
     @State private var showingScanner = false
     @State private var scannerStatus: QRScannerView.Status = .ready
     @State private var lastScanError: String?
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         NavigationStack {
@@ -44,11 +45,27 @@ struct ContentView: View {
             measurementSheet(for: request)
         }
         .onAppear {
-            // Auto-reconnect to the first known Mac on launch. Real
-            // mDNS-based discovery for IP changes comes in a later
-            // milestone if it proves necessary.
+            // First-launch and view-mount auto-reconnect to the first
+            // known Mac. The scene-phase handler below covers the
+            // foreground-from-background case.
             if case .idle = flow.state, let first = KnownServerStore.all().first {
                 flow.reconnect(to: first)
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // iOS kills the TCP socket while we're backgrounded · plain
+            // TCP doesn't get any background exceptions. Every time the
+            // user brings us back to .active we re-establish the link
+            // so they don't have to think about it. If the connection
+            // is still alive (rare but possible on quick app-switches)
+            // the existing flow is left in place.
+            guard phase == .active else { return }
+            guard let first = KnownServerStore.all().first else { return }
+            switch flow.state {
+            case .idle, .failed:
+                flow.reconnect(to: first)
+            case .connecting, .authenticating, .paired, .measuring:
+                break
             }
         }
     }
