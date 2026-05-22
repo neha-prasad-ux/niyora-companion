@@ -66,22 +66,24 @@ struct PPGSignalProcessor {
     /// green ratio · hemoglobin absorbs green light strongly and
     /// reflects red strongly, so a finger + torch gives R/G of about
     /// 3 to 6, while the camera looking at a normal scene gives R/G
-    /// around 0.8 to 1.2 (roughly balanced color). Color RATIOS are
-    /// immune to exposure-mode quirks · they hold even when absolute
-    /// brightness wobbles.
+    /// around 0.8 to 1.2 (roughly balanced color). With a bright torch
+    /// the absorbed green can drop almost to zero, sending the ratio
+    /// into the hundreds · that is exactly the signal we want.
     func fingerLikelyOnLens() -> Bool {
         let lookback = Int(Self.sampleRateHz * 0.5)
         guard samples.count >= lookback,
               redSamples.count >= lookback else { return false }
         let g = samples.suffix(lookback).reduce(0, +) / Double(lookback)
         let r = redSamples.suffix(lookback).reduce(0, +) / Double(lookback)
-        // Avoid divide-by-zero if the camera is totally black.
-        guard g > 1 else { return false }
-        let ratio = r / g
-        // 2.0 is a generous floor · real readings are usually 3-6.
-        // Mean checks reject obvious black/saturated frames where the
-        // ratio is meaningless.
-        return ratio > 2.0 && r > 30 && r < 252 && g < 250
+        // Floor the denominator rather than rejecting low-green frames.
+        // When the torch is bright and a finger covers the lens green
+        // averages near 0 · that is the signal we want to keep, not
+        // discard as "too dark."
+        let safeG = max(g, 0.5)
+        let ratio = r / safeG
+        // r in [30, 252] rejects ambient (too dim) and saturated frames.
+        // No upper bound on g · with a finger on, it's tiny anyway.
+        return ratio > 2.0 && r > 30 && r < 252
     }
 
     /// Run the full pipeline against the current buffer and return the
