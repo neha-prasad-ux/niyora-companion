@@ -75,8 +75,8 @@ final class MeasurementController {
         guard case .idle = state else { return }
         state = .preparing
         do {
-            try await capture.start { [weak self] green in
-                self?.onFrame(greenMean: green)
+            try await capture.start { [weak self] green, red in
+                self?.onFrame(green: green, red: red)
             }
         } catch {
             state = .failed(friendlyStartError(error))
@@ -103,20 +103,28 @@ final class MeasurementController {
         ))
     }
 
-    private nonisolated func onFrame(greenMean: Double) {
+    private nonisolated func onFrame(green: Double, red: Double) {
         Task { @MainActor [weak self] in
-            self?.appendFrame(greenMean: greenMean)
+            self?.appendFrame(green: green, red: red)
         }
     }
 
-    private func appendFrame(greenMean: Double) {
+    private func appendFrame(green: Double, red: Double) {
         switch state {
         case .placingFinger, .readyCountdown, .capturing:
-            processor.append(greenMean)
+            processor.append(green: green, red: red)
         default:
             return
         }
         fingerOnLens = processor.fingerLikelyOnLens()
+        // Diagnostic: log the color readings about twice a second
+        // during placingFinger so we can see what the detector is
+        // actually working with on the user's device.
+        if case .placingFinger = state, processor.samples.count % 15 == 0 {
+            let g = green
+            let r = red
+            print("[MeasureCtrl] frame · green=\(String(format: "%.1f", g)) red=\(String(format: "%.1f", r)) ratio=\(g > 0 ? String(format: "%.2f", r / g) : "n/a") fingerOnLens=\(fingerOnLens)")
+        }
 
         switch state {
         case .placingFinger:

@@ -36,45 +36,52 @@ struct PPGSignalProcessor {
     static let minSnrDb: Double = 2.0
 
     /// Raw per-frame mean green values, oldest first. Trimmed to the
-    /// window the caller passes when computing metrics.
+    /// window the caller passes when computing metrics. Green is the
+    /// PPG signal channel · the HRV math runs on this alone.
     private(set) var samples: [Double] = []
+    /// Per-frame mean red values, paired with `samples`. Used only by
+    /// the finger-on detector · the red-to-green ratio is a robust
+    /// signature of "finger on lens with torch on" (hemoglobin absorbs
+    /// green strongly, reflects red strongly, so R/G goes to 3-6×).
+    private(set) var redSamples: [Double] = []
 
-    /// Append a freshly measured green-channel mean. O(1).
-    mutating func append(_ greenMean: Double) {
-        samples.append(greenMean)
+    /// Append a freshly measured frame summary. O(1).
+    mutating func append(green: Double, red: Double) {
+        samples.append(green)
+        redSamples.append(red)
     }
 
     /// Drop the first `n` samples · the capture layer uses this to skip
     /// the first ~1s of stabilisation while the AGC and torch settle.
     mutating func dropFirst(_ n: Int) {
         guard n > 0 else { return }
-        samples.removeFirst(min(n, samples.count))
+        let drop = min(n, samples.count)
+        samples.removeFirst(drop)
+        let dropRed = min(n, redSamples.count)
+        redSamples.removeFirst(dropRed)
     }
 
     /// Whether the most recent window of samples looks like a finger is
-    /// on the lens. With the torch on, hemoglobin absorbs the green
-    /// wavelength strongly · the reflected light is red-dominant and
-    /// the green channel reads LOW, not high. The earlier 100-230
-    /// range mistakenly excluded the actual finger-on case (green ~20-
-    /// 100 in real readings). The strong discriminator is the
-    /// time-domain stability of the signal · a steadily-placed finger
-    /// gives an extremely uniform frame-to-frame green-channel mean
-    /// (std under ~6 units of 0-255), while the camera looking at any
-    /// real scene shows micro-shake / scene change with std 10+.
+    /// on the lens with the torch on. The robust signal is the red-to-
+    /// green ratio · hemoglobin absorbs green light strongly and
+    /// reflects red strongly, so a finger + torch gives R/G of about
+    /// 3 to 6, while the camera looking at a normal scene gives R/G
+    /// around 0.8 to 1.2 (roughly balanced color). Color RATIOS are
+    /// immune to exposure-mode quirks · they hold even when absolute
+    /// brightness wobbles.
     func fingerLikelyOnLens() -> Bool {
-        let lookback = Int(Self.sampleRateHz * 0.7)
-        guard samples.count >= lookback else { return false }
-        let tail = samples.suffix(lookback)
-        let mean = tail.reduce(0, +) / Double(tail.count)
-        let variance = tail.reduce(0.0) { acc, v in acc + (v - mean) * (v - mean) } / Double(tail.count)
-        let std = variance.squareRoot()
-        // Std is the primary signal. The previous threshold of 6 was
-        // tight enough that real pulse modulation (~3-5 units of swing
-        // on a 50-mean signal) plus camera noise (~2 units) pushed
-        // legitimate finger-on captures above 6 and the detector said
-        // "no finger." Raised to 12 · still well below the 20+ std a
-        // moving camera sees of a room.
-        return std < 12.0 && mean > 12 && mean < 220
+        let lookback = Int(Self.sampleRateHz * 0.5)
+        guard samples.count >= lookback,
+              redSamples.count >= lookback else { return false }
+        let g = samples.suffix(lookback).reduce(0, +) / Double(lookback)
+        let r = redSamples.suffix(lookback).reduce(0, +) / Double(lookback)
+        // Avoid divide-by-zero if the camera is totally black.
+        guard g > 1 else { return false }
+        let ratio = r / g
+        // 2.0 is a generous floor · real readings are usually 3-6.
+        // Mean checks reject obvious black/saturated frames where the
+        // ratio is meaningless.
+        return ratio > 2.0 && r > 30 && r < 252 && g < 250
     }
 
     /// Run the full pipeline against the current buffer and return the

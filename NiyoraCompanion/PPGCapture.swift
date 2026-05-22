@@ -16,9 +16,11 @@ import UIKit
 /// a cleaner pulse signal than averaging the whole frame.
 final class PPGCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
 
-    /// Called on the main actor with each new green-channel mean. The
-    /// owning controller appends to the signal processor and updates UI.
-    typealias FrameHandler = @MainActor (Double) -> Void
+    /// Called on the main actor with each new frame's color summary.
+    /// Green is the PPG signal channel (hemoglobin absorbs green); red
+    /// is carried alongside so the finger-on detector can use the
+    /// R/G ratio as a robust "is a finger on the torch" signal.
+    typealias FrameHandler = @MainActor (_ green: Double, _ red: Double) -> Void
 
     enum StartError: Error {
         case noBackCamera
@@ -120,17 +122,18 @@ final class PPGCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         print("[PPGCapture] pre-torch · hasTorch=\(dev.hasTorch) isTorchAvailable=\(dev.isTorchAvailable) supportsOn=\(dev.isTorchModeSupported(.on)) isTorchActive=\(dev.isTorchActive)")
         do {
             try dev.lockForConfiguration()
-            if dev.hasTorch {
-                if dev.isTorchModeSupported(.on) {
-                    dev.torchMode = .on
-                }
-                // If that didn't actually turn the LED on, try the
-                // explicit-level API as a fallback.
-                if !dev.isTorchActive, dev.isTorchAvailable {
-                    do {
-                        try dev.setTorchModeOn(level: 1.0)
-                    } catch {
-                        print("[PPGCapture] setTorchModeOn fallback failed: \(error.localizedDescription)")
+            if dev.hasTorch, dev.isTorchAvailable {
+                // 0.5 keeps the LED bright enough to illuminate the
+                // finger without saturating the camera sensor through
+                // the skin. Full brightness pushed the green channel
+                // above 220 on some skin types, which the finger-on
+                // detector then incorrectly rejected.
+                do {
+                    try dev.setTorchModeOn(level: 0.5)
+                } catch {
+                    // Fall back to the simpler API, which uses max level.
+                    if dev.isTorchModeSupported(.on) {
+                        dev.torchMode = .on
                     }
                 }
             }
@@ -161,21 +164,21 @@ final class PPGCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         from connection: AVCaptureConnection
     ) {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-        let green = Self.meanGreenInCenterROI(pixelBuffer)
+        let (green, red) = Self.meanGreenRedInCenterROI(pixelBuffer)
         guard let handler = onFrame else { return }
         Task { @MainActor in
-            handler(green)
+            handler(green, red)
         }
     }
 
-    /// Average the green byte across a 200x200 centred ROI. Returns 0
-    /// if locking the pixel buffer fails · the signal processor's
-    /// finger-detector will mark that as "no finger" rather than a peak.
-    static func meanGreenInCenterROI(_ pixelBuffer: CVPixelBuffer) -> Double {
+    /// Average the green and red bytes across a 200x200 centred ROI.
+    /// Returns (0, 0) if locking the pixel buffer fails · the signal
+    /// processor's finger-detector will mark that as "no finger."
+    static func meanGreenRedInCenterROI(_ pixelBuffer: CVPixelBuffer) -> (green: Double, red: Double) {
         CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
 
-        guard let base = CVPixelBufferGetBaseAddress(pixelBuffer) else { return 0 }
+        guard let base = CVPixelBufferGetBaseAddress(pixelBuffer) else { return (0, 0) }
         let width = CVPixelBufferGetWidth(pixelBuffer)
         let height = CVPixelBufferGetHeight(pixelBuffer)
         let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
@@ -185,17 +188,19 @@ final class PPGCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         let startY = (height - roiH) / 2
 
         let buffer = base.assumingMemoryBound(to: UInt8.self)
-        var sum: UInt64 = 0
+        var sumG: UInt64 = 0
+        var sumR: UInt64 = 0
         var count: UInt64 = 0
         for y in startY..<(startY + roiH) {
             let row = buffer.advanced(by: y * bytesPerRow)
             for x in startX..<(startX + roiW) {
-                // BGRA layout · green is byte index 1 in each pixel.
-                sum &+= UInt64(row[x * 4 + 1])
+                // BGRA layout · blue=0, green=1, red=2, alpha=3.
+                sumG &+= UInt64(row[x * 4 + 1])
+                sumR &+= UInt64(row[x * 4 + 2])
                 count &+= 1
             }
         }
-        guard count > 0 else { return 0 }
-        return Double(sum) / Double(count)
+        guard count > 0 else { return (0, 0) }
+        return (Double(sumG) / Double(count), Double(sumR) / Double(count))
     }
 }
