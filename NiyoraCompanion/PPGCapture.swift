@@ -97,20 +97,38 @@ final class PPGCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
             session.startRunning()
         }.value
 
-        // Now that the session is running, the torch will actually turn
-        // on. Without this second pass we get no light, ambient noise
-        // gets misread as a finger, and the pipeline produces garbage.
+        // Some devices need a beat between session-running and the
+        // torch coming on · the AVCaptureSession is technically
+        // running when startRunning returns, but the underlying media
+        // pipeline isn't always immediately ready to actually drive
+        // the torch on iPhone 14/15/16 with adaptive true-tone flash.
+        try? await Task.sleep(nanoseconds: 250_000_000)
+
+        // Torch on. `torchMode = .on` is the older, simpler property
+        // and seems to work on devices where setTorchModeOnWithLevel
+        // silently fails. We try `.on` first, fall back to the
+        // level-based variant only if it fails.
+        print("[PPGCapture] pre-torch · hasTorch=\(dev.hasTorch) isTorchAvailable=\(dev.isTorchAvailable) supportsOn=\(dev.isTorchModeSupported(.on)) isTorchActive=\(dev.isTorchActive)")
         do {
             try dev.lockForConfiguration()
-            if dev.hasTorch, dev.isTorchModeSupported(.on) {
-                try dev.setTorchModeOn(level: 0.5)
+            if dev.hasTorch {
+                if dev.isTorchModeSupported(.on) {
+                    dev.torchMode = .on
+                }
+                // If that didn't actually turn the LED on, try the
+                // explicit-level API as a fallback.
+                if !dev.isTorchActive, dev.isTorchAvailable {
+                    do {
+                        try dev.setTorchModeOn(level: 1.0)
+                    } catch {
+                        print("[PPGCapture] setTorchModeOn fallback failed: \(error.localizedDescription)")
+                    }
+                }
             }
             dev.unlockForConfiguration()
+            print("[PPGCapture] post-torch · torchMode=\(dev.torchMode.rawValue) isTorchActive=\(dev.isTorchActive) torchLevel=\(dev.torchLevel)")
         } catch {
-            // Soft-fail · the capture still proceeds (the finger-on
-            // detector will catch a no-light situation and abort with
-            // low_signal), but we let the user know.
-            print("[PPGCapture] torch on failed: \(error.localizedDescription)")
+            print("[PPGCapture] lockForConfiguration failed: \(error.localizedDescription)")
         }
     }
 
