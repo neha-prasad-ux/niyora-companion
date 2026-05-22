@@ -22,6 +22,12 @@ struct MeasurementSheet: View {
     let onComplete: (PPGMeasurementResult) -> Void
 
     @State private var controller: MeasurementController?
+    /// Guards against `.onAppear` firing more than once. SwiftUI can
+    /// re-emit appear callbacks during recomposition or after iOS
+    /// snapshots, and we cannot afford to start the AVCaptureSession
+    /// twice on the same hardware · the second `startRunning` will
+    /// interrupt the first and the torch never settles.
+    @State private var hasStarted = false
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -52,8 +58,10 @@ struct MeasurementSheet: View {
 
             cancelChip
         }
-        .task(id: request.id) {
-            await startMeasurement()
+        .onAppear {
+            guard !hasStarted else { return }
+            hasStarted = true
+            Task { await startMeasurement() }
         }
         .onDisappear {
             controller?.cancel()
