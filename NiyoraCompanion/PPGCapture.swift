@@ -175,11 +175,14 @@ final class PPGCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         // commands reliably.
         try? await Task.sleep(nanoseconds: 200_000_000)
 
-        // Torch on, with up to 3 attempts. Each attempt sets the mode
-        // then verifies that iOS actually activated the LED · if it
-        // didn't, we wait briefly and retry. Use `.on` (max level) for
-        // the broadest device compatibility; `setTorchModeOn(level:)`
-        // silently failed on some devices.
+        // Torch on, at half brightness. iOS has a per-device per-time
+        // torch power budget · running at max (torchMode = .on, level
+        // 1.0) drains it within seconds on some devices, after which
+        // iOS refuses to re-arm. Half power runs cooler and stays
+        // within budget for the full 30s capture on more devices.
+        // Each attempt verifies that iOS actually activated the LED
+        // and retries if not. Falls back to .on (max level) if the
+        // level-based API fails outright.
         #if DEBUG
         print("[PPGCapture] pre-torch · hasTorch=\(dev.hasTorch) isTorchAvailable=\(dev.isTorchAvailable) supportsOn=\(dev.isTorchModeSupported(.on)) isTorchActive=\(dev.isTorchActive)")
         #endif
@@ -187,8 +190,14 @@ final class PPGCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         for attempt in 0..<3 {
             do {
                 try dev.lockForConfiguration()
-                if dev.hasTorch, dev.isTorchAvailable, dev.isTorchModeSupported(.on) {
-                    dev.torchMode = .on
+                if dev.hasTorch, dev.isTorchAvailable {
+                    do {
+                        try dev.setTorchModeOn(level: 0.5)
+                    } catch {
+                        if dev.isTorchModeSupported(.on) {
+                            dev.torchMode = .on
+                        }
+                    }
                 }
                 dev.unlockForConfiguration()
             } catch {
@@ -239,8 +248,15 @@ final class PPGCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         if dev.isTorchActive { return }
         do {
             try dev.lockForConfiguration()
-            if dev.isTorchModeSupported(.on) {
-                dev.torchMode = .on
+            // Re-arm at half power to match the start configuration ·
+            // see comment on the initial torch setup for the budget
+            // reasoning.
+            do {
+                try dev.setTorchModeOn(level: 0.5)
+            } catch {
+                if dev.isTorchModeSupported(.on) {
+                    dev.torchMode = .on
+                }
             }
             dev.unlockForConfiguration()
             #if DEBUG
