@@ -38,6 +38,11 @@ final class PPGCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     private var device: AVCaptureDevice?
     private var onFrame: FrameHandler?
     private var observers: [NSObjectProtocol] = []
+    /// Periodic background task that re-arms the torch when iOS silently
+    /// turns it off mid-capture. Some devices (thermal, power policy)
+    /// drop the torch a few seconds after enabling it · the keeper
+    /// notices via isTorchActive and forces it back on.
+    private var torchKeeperTask: Task<Void, Never>?
 
     override init() {
         super.init()
@@ -208,10 +213,48 @@ final class PPGCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         if !torchActivated {
             throw StartError.configurationFailed("The flashlight would not turn on. Close other apps that might be using the camera, then try again.")
         }
+
+        startTorchKeeper()
+    }
+
+    /// Background loop that re-arms the torch when iOS turns it off
+    /// mid-capture. Polls `isTorchActive` once a second; if iOS has
+    /// dropped it, locks the device and sets torchMode = .on again.
+    /// Stopped explicitly in `stop()` so the torch goes off when the
+    /// measurement ends.
+    private func startTorchKeeper() {
+        torchKeeperTask?.cancel()
+        torchKeeperTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard let self else { return }
+                self.rearmTorchIfNeeded()
+            }
+        }
+    }
+
+    private func rearmTorchIfNeeded() {
+        guard let dev = device else { return }
+        guard dev.hasTorch, dev.isTorchAvailable else { return }
+        if dev.isTorchActive { return }
+        do {
+            try dev.lockForConfiguration()
+            if dev.isTorchModeSupported(.on) {
+                dev.torchMode = .on
+            }
+            dev.unlockForConfiguration()
+            #if DEBUG
+            print("[PPGCapture] torch re-armed · isTorchActive=\(dev.isTorchActive) torchLevel=\(dev.torchLevel)")
+            #endif
+        } catch {
+            // Best-effort. If we can't lock, try again on the next tick.
+        }
     }
 
     /// Stop the session and turn the torch off. Idempotent.
     func stop() {
+        torchKeeperTask?.cancel()
+        torchKeeperTask = nil
         if session.isRunning { session.stopRunning() }
         if let dev = device {
             try? dev.lockForConfiguration()
