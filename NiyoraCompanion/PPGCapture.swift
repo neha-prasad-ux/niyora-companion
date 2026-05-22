@@ -106,9 +106,11 @@ final class PPGCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
 
         // Torch on. `torchMode = .on` is the older, simpler property
         // and seems to work on devices where setTorchModeOnWithLevel
-        // silently fails. We try `.on` first, fall back to the
-        // level-based variant only if it fails.
+        // silently fails. We try the level variant first, fall back
+        // to `.on` only if it throws.
+        #if DEBUG
         print("[PPGCapture] pre-torch · hasTorch=\(dev.hasTorch) isTorchAvailable=\(dev.isTorchAvailable) supportsOn=\(dev.isTorchModeSupported(.on)) isTorchActive=\(dev.isTorchActive)")
+        #endif
         do {
             try dev.lockForConfiguration()
             if dev.hasTorch, dev.isTorchAvailable {
@@ -127,9 +129,11 @@ final class PPGCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
                 }
             }
             dev.unlockForConfiguration()
+            #if DEBUG
             print("[PPGCapture] post-torch · torchMode=\(dev.torchMode.rawValue) isTorchActive=\(dev.isTorchActive) torchLevel=\(dev.torchLevel)")
+            #endif
         } catch {
-            print("[PPGCapture] lockForConfiguration failed: \(error.localizedDescription)")
+            throw StartError.configurationFailed("Could not turn on the torch: \(error.localizedDescription)")
         }
     }
 

@@ -117,14 +117,11 @@ final class MeasurementController {
             return
         }
         fingerOnLens = processor.fingerLikelyOnLens()
-        // Diagnostic: log the color readings about twice a second
-        // during placingFinger so we can see what the detector is
-        // actually working with on the user's device.
+        #if DEBUG
         if case .placingFinger = state, processor.samples.count % 15 == 0 {
-            let g = green
-            let r = red
-            print("[MeasureCtrl] frame · green=\(String(format: "%.1f", g)) red=\(String(format: "%.1f", r)) ratio=\(g > 0 ? String(format: "%.2f", r / g) : "n/a") fingerOnLens=\(fingerOnLens)")
+            print("[MeasureCtrl] frame · green=\(String(format: "%.1f", green)) red=\(String(format: "%.1f", red)) ratio=\(green > 0 ? String(format: "%.2f", red / green) : "n/a") fingerOnLens=\(fingerOnLens)")
         }
+        #endif
 
         switch state {
         case .placingFinger:

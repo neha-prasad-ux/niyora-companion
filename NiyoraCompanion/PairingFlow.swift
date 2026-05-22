@@ -118,15 +118,19 @@ final class PairingFlow {
             status: result.status
         )
         var delivered = false
-        if connection != nil {
+        if let conn = connection {
             do {
-                try await connection?.send(message)
+                try await conn.send(message)
                 delivered = true
             } catch {
                 // Fall through to the local queue.
             }
         }
-        if !delivered {
+        if delivered {
+            // While we have a live link, try to push any older results
+            // that have been sitting in the queue. Cheap if empty.
+            await drainLocalQueue()
+        } else {
             // Either the phone isn't connected, or send threw. Stash
             // the result so the next reconnect can drain it.
             LocalMeasurementStore.enqueue(LocalMeasurementStore.Pending(

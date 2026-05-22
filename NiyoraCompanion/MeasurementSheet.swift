@@ -11,11 +11,17 @@ import SwiftUI
 ///
 /// Used for both Mac-initiated measurements (Measure stress on Mac)
 /// and phone-initiated ones (Measure button on the iOS app home).
+///
+/// The sheet owns its `MeasurementController` lifecycle. Creating the
+/// controller from inside the parent's view body caused state-update
+/// races that killed the torch · keeping ownership local plus
+/// `.task(id:)` gives a single, cancellable start per request.
 struct MeasurementSheet: View {
-    @Bindable var controller: MeasurementController
+    let request: PairingFlow.PendingRequest
     let onCancel: () -> Void
-    let onRetry: () -> Void
-    let onDone: () -> Void
+    let onComplete: (PPGMeasurementResult) -> Void
+
+    @State private var controller: MeasurementController?
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -24,13 +30,19 @@ struct MeasurementSheet: View {
 
             GeometryReader { proxy in
                 VStack(spacing: 0) {
-                    header
-                        .padding(.top, 8)
-                    Spacer(minLength: 12)
-                    content
-                        .frame(maxWidth: .infinity)
-                    Spacer(minLength: 12)
-                    footer
+                    if let controller {
+                        header(controller: controller)
+                            .padding(.top, 8)
+                        Spacer(minLength: 12)
+                        stateContent(controller: controller)
+                            .frame(maxWidth: .infinity)
+                        Spacer(minLength: 12)
+                        footer(controller: controller)
+                    } else {
+                        Spacer()
+                        preparingView
+                        Spacer()
+                    }
                 }
                 .padding(.horizontal, 28)
                 .padding(.bottom, max(20, proxy.safeAreaInsets.bottom + 4))
@@ -39,6 +51,12 @@ struct MeasurementSheet: View {
             .foregroundStyle(.white)
 
             cancelChip
+        }
+        .task(id: request.id) {
+            await startMeasurement()
+        }
+        .onDisappear {
+            controller?.cancel()
         }
     }
 
@@ -66,6 +84,7 @@ struct MeasurementSheet: View {
 
     private var cancelChip: some View {
         Button {
+            controller?.cancel()
             onCancel()
         } label: {
             Image(systemName: "xmark")
@@ -79,9 +98,9 @@ struct MeasurementSheet: View {
         .accessibilityLabel("Cancel measurement")
     }
 
-    private var header: some View {
+    private func header(controller: MeasurementController) -> some View {
         VStack(spacing: 4) {
-            Text(eyebrowText)
+            Text(eyebrowText(controller: controller))
                 .font(.system(size: 11, weight: .medium))
                 .textCase(.uppercase)
                 .tracking(3)
@@ -94,26 +113,44 @@ struct MeasurementSheet: View {
         }
     }
 
-    private var eyebrowText: String {
+    private func eyebrowText(controller: MeasurementController) -> String {
         if controller.isStandalone { return "Stress check" }
         return controller.phase == .pre ? "Before breath" : "After breath"
+    }
+
+    // MARK: - Lifecycle
+
+    private func startMeasurement() async {
+        controller?.cancel()
+        let fresh = MeasurementController(
+            sessionId: request.sessionId,
+            phase: request.phase,
+            techniqueName: request.techniqueName,
+            isStandalone: request.isStandalone
+        )
+        controller = fresh
+        await fresh.start()
+    }
+
+    private func handleRetry() {
+        Task { await startMeasurement() }
     }
 
     // MARK: - Content per state
 
     @ViewBuilder
-    private var content: some View {
+    private func stateContent(controller: MeasurementController) -> some View {
         switch controller.state {
         case .idle, .preparing:
             preparingView
         case .placingFinger:
-            placingFingerView
+            placingFingerView(controller: controller)
         case .readyCountdown(let remaining):
             readyView(remaining: remaining)
         case .capturing(let elapsed):
-            capturingView(elapsed: elapsed)
+            capturingView(elapsed: elapsed, controller: controller)
         case .finished(let result):
-            finishedView(result)
+            finishedView(result, controller: controller)
         case .failed(let reason):
             failedView(reason)
         }
@@ -128,7 +165,7 @@ struct MeasurementSheet: View {
         }
     }
 
-    private var placingFingerView: some View {
+    private func placingFingerView(controller: MeasurementController) -> some View {
         VStack(spacing: 28) {
             // Live camera preview in a violet-tinted ring. The user
             // sees the room until they cover the lens · once their
@@ -199,7 +236,7 @@ struct MeasurementSheet: View {
         .animation(.easeOut(duration: 0.2), value: Int(remaining.rounded(.up)))
     }
 
-    private func capturingView(elapsed: Double) -> some View {
+    private func capturingView(elapsed: Double, controller: MeasurementController) -> some View {
         let total = MeasurementController.captureDurationSec
         let remaining = max(0, total - elapsed)
         let remainingSec = Int(remaining.rounded(.up))
@@ -266,7 +303,7 @@ struct MeasurementSheet: View {
         }
     }
 
-    private func finishedView(_ result: PPGMeasurementResult) -> some View {
+    private func finishedView(_ result: PPGMeasurementResult, controller: MeasurementController) -> some View {
         VStack(spacing: 20) {
             switch result.status {
             case .ok:
@@ -375,20 +412,20 @@ struct MeasurementSheet: View {
     }
 
     @ViewBuilder
-    private var footer: some View {
+    private func footer(controller: MeasurementController) -> some View {
         switch controller.state {
         case .finished(let result):
             switch result.status {
             case .ok, .cancelled:
-                primaryPill(title: "Done", action: onDone)
+                primaryPill(title: "Done", action: { onComplete(result) })
             case .lowSignal, .fingerLifted:
                 HStack(spacing: 12) {
-                    secondaryPill(title: "Close", action: onDone)
-                    primaryPill(title: "Try again", action: onRetry)
+                    secondaryPill(title: "Close", action: { onComplete(result) })
+                    primaryPill(title: "Try again", action: handleRetry)
                 }
             }
         case .failed:
-            primaryPill(title: "Close", action: onDone)
+            primaryPill(title: "Close", action: onCancel)
         default:
             EmptyView()
         }

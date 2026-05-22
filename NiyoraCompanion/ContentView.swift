@@ -20,7 +20,6 @@ struct ContentView: View {
     @State private var showingScanner = false
     @State private var scannerStatus: QRScannerView.Status = .ready
     @State private var lastScanError: String?
-    @State private var measurementController: MeasurementController?
 
     var body: some View {
         NavigationStack {
@@ -213,62 +212,25 @@ struct ContentView: View {
 
     // MARK: - Measurement
 
-    @ViewBuilder
     private func measurementSheet(for request: PairingFlow.PendingRequest) -> some View {
-        let controller = makeOrReuseController(for: request)
+        // The sheet owns its `MeasurementController` lifecycle · we
+        // only react to the two terminal outcomes here. See
+        // `MeasurementSheet` for why ownership lives there.
         MeasurementSheet(
-            controller: controller,
+            request: request,
             onCancel: {
-                controller.cancel()
                 flow.clearPendingRequest()
-                measurementController = nil
             },
-            onRetry: {
-                let fresh = MeasurementController(
-                    sessionId: request.sessionId,
-                    phase: request.phase,
-                    techniqueName: request.techniqueName,
-                    isStandalone: request.isStandalone
-                )
-                measurementController = fresh
-                Task { await fresh.start() }
-            },
-            onDone: {
+            onComplete: { result in
                 Task {
-                    if case let .finished(result) = controller.state {
-                        await flow.sendResult(
-                            sessionId: request.sessionId,
-                            phase: request.phase,
-                            result: result
-                        )
-                    } else {
-                        flow.clearPendingRequest()
-                    }
-                    measurementController = nil
+                    await flow.sendResult(
+                        sessionId: request.sessionId,
+                        phase: request.phase,
+                        result: result
+                    )
                 }
             }
         )
-        .onAppear {
-            if case .idle = controller.state {
-                Task { await controller.start() }
-            }
-        }
-    }
-
-    private func makeOrReuseController(for request: PairingFlow.PendingRequest) -> MeasurementController {
-        if let existing = measurementController,
-           existing.sessionId == request.sessionId,
-           existing.phase == request.phase {
-            return existing
-        }
-        let fresh = MeasurementController(
-            sessionId: request.sessionId,
-            phase: request.phase,
-            techniqueName: request.techniqueName,
-            isStandalone: request.isStandalone
-        )
-        measurementController = fresh
-        return fresh
     }
 
     // MARK: - Scanner
