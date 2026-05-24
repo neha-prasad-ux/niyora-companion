@@ -1,3 +1,4 @@
+#if NIYORA_V1_PPG_ENABLED
 import SwiftUI
 
 /// Live pulse waveform shown on the measurement sheet. Renders a
@@ -29,3 +30,4 @@ struct WaveformView: View {
         }
     }
 }
+#endif

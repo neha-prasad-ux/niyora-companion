@@ -1,3 +1,4 @@
+#if NIYORA_V1_PPG_ENABLED
 import Foundation
 
 /// Processes a stream of per-frame green-channel means into HRV metrics.
@@ -341,3 +342,4 @@ struct PPGSignalProcessor {
         return 10.0 * log10(total / noise)
     }
 }
+#endif
