@@ -34,24 +34,24 @@ struct BreathHomeView: View {
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                topBar
-                    .padding(.horizontal, 20)
-                    .padding(.top, 8)
+                // Top header block: anchored at top
+                VStack(spacing: 6) {
+                    topBar
+                        .padding(.horizontal, 20)
+                    tagline
+                }
 
-                tagline
-                    .padding(.top, 6)
-
-                Spacer(minLength: 0)
-
+                // Middle: orb expands to fill available vertical space
+                Spacer(minLength: 8)
                 orbView
+                Spacer(minLength: 8)
 
-                Spacer(minLength: 0)
-
-                techniqueText
-                    .padding(.bottom, 18)
-
-                actions
-                    .padding(.horizontal, 24)
+                // Bottom block: technique caption + actions, anchored at bottom
+                VStack(spacing: 18) {
+                    techniqueText
+                    actions
+                        .padding(.horizontal, 24)
+                }
             }
         }
         .preferredColorScheme(.dark)
@@ -73,14 +73,14 @@ struct BreathHomeView: View {
     // MARK: - Top status row
 
     private var topBar: some View {
-        HStack {
+        HStack(spacing: 0) {
             Button {
                 showMySoul = true
             } label: {
                 Image(systemName: "person")
-                    .font(.system(size: 17, weight: .regular))
+                    .font(.system(size: 22, weight: .regular))
                     .foregroundStyle(.white.opacity(0.7))
-                    .frame(width: 36, height: 36)
+                    .frame(width: 44, height: 44)
             }
             .buttonStyle(.plain)
 
@@ -127,8 +127,12 @@ struct BreathHomeView: View {
     // MARK: - Orb
 
     private var orbView: some View {
-        let core: CGFloat = 240
-        let halo: CGFloat = core * 1.3
+        // Core diameter sized so the orb dominates the canvas without
+        // pushing the begin button below the safe area. Halo blur was
+        // inflating the layout frame in earlier iterations so it sits
+        // tighter to the core here (1.1x).
+        let core: CGFloat = 280
+        let halo: CGFloat = core * 1.05
         return ZStack {
             // Outer halo
             Circle()
@@ -144,7 +148,7 @@ struct BreathHomeView: View {
                     )
                 )
                 .frame(width: halo, height: halo)
-                .blur(radius: 14)
+                .blur(radius: 6)
 
             // Core orb (pearl rose: bright highlight upper-left,
             // mid rose body, deep mauve edge — same palette as the
@@ -163,13 +167,13 @@ struct BreathHomeView: View {
                     )
                 )
                 .frame(width: core, height: core)
-                .shadow(color: Color(red: 0.7, green: 0.4, blue: 0.5).opacity(0.35), radius: 38, x: 0, y: 14)
                 .overlay(
                     // Subtle inner edge darkening for depth
                     Circle()
                         .strokeBorder(Color.black.opacity(0.15), lineWidth: 1)
                 )
         }
+        .frame(width: halo, height: halo)
     }
 
     // MARK: - Technique label
@@ -207,7 +211,16 @@ struct BreathHomeView: View {
     // MARK: - Actions
 
     private var actions: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 12) {
+            Button {
+                rotateTechnique()
+            } label: {
+                Text("Try a different one")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.7))
+            }
+            .buttonStyle(.plain)
+
             Button {
                 showSession = true
             } label: {
@@ -228,16 +241,6 @@ struct BreathHomeView: View {
                     )
                     .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
                     .shadow(color: Color(hue: 270.0 / 360.0, saturation: 0.5, brightness: 0.4).opacity(0.4), radius: 14, x: 0, y: 6)
-            }
-            .buttonStyle(.plain)
-
-            Button {
-                rotateTechnique()
-            } label: {
-                Text("Try a different one")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.7))
-                    .padding(.top, 4)
             }
             .buttonStyle(.plain)
         }
