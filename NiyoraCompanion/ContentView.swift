@@ -1,12 +1,9 @@
 import SwiftUI
 
-/// The primary screen of Niyora Companion. Three states:
+/// The primary screen of Niyora Companion. Two tabs:
 ///
-/// 1. No Mac paired yet: introduction + a single "Connect to Mac" button
-///    that opens the QR scanner.
-/// 2. At least one Mac paired: paired status, last received request, and
-///    a small footer about how measurements work.
-/// 3. Scanning: full-screen camera preview with a cancel chip.
+/// 1. Pairing: Mac pairing flow + measurement status
+/// 2. Breath: All 14 breathing techniques + mindfulness moments
 ///
 /// When the Mac sends a `request_measurement` frame, `MeasurementSheet`
 /// presents over the whole view to drive a 30s PPG capture.
@@ -23,19 +20,15 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        NavigationStack {
-            mainContent
-                .navigationTitle("Niyora Companion")
-                .toolbar {
-                    #if DEBUG
-                    ToolbarItem(placement: .topBarTrailing) {
-                        NavigationLink {
-                            HRVSpikeView()
-                        } label: {
-                            Image(systemName: "waveform.path.ecg")
-                        }
-                    }
-                    #endif
+        TabView {
+            pairingTab
+                .tabItem {
+                    Label("Connect", systemImage: "iphone.and.arrow.forward")
+                }
+
+            BreathTabView()
+                .tabItem {
+                    Label("Breath", systemImage: "wind")
                 }
         }
         .fullScreenCover(isPresented: $showingScanner) {
@@ -67,6 +60,26 @@ struct ContentView: View {
             case .connecting, .authenticating, .paired, .measuring:
                 break
             }
+        }
+    }
+
+    // MARK: - Pairing tab
+
+    private var pairingTab: some View {
+        NavigationStack {
+            mainContent
+                .navigationTitle("Niyora Companion")
+                .toolbar {
+                    #if DEBUG
+                    ToolbarItem(placement: .topBarTrailing) {
+                        NavigationLink {
+                            HRVSpikeView()
+                        } label: {
+                            Image(systemName: "waveform.path.ecg")
+                        }
+                    }
+                    #endif
+                }
         }
     }
 
