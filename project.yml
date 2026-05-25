@@ -10,6 +10,11 @@ settings:
     CURRENT_PROJECT_VERSION: "1"
     SWIFT_VERSION: "5.0"
     GENERATE_INFOPLIST_FILE: "YES"
+    # User-facing app name. The Xcode target is still "NiyoraCompanion"
+    # for source compatibility with the v0 companion build pipeline, but
+    # the home-screen icon label and Spotlight result should just read
+    # "Niyora" to match the brand.
+    INFOPLIST_KEY_CFBundleDisplayName: "Niyora"
     # Shown in the HealthKit permission sheet. The shipping HRV path is
     # PPG (no HealthKit); HealthKit is read only by the DEBUG spike
     # screen, which we still ship the entitlement for so a developer
