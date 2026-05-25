@@ -1,5 +1,8 @@
 #if NIYORA_V1_PPG_ENABLED
 import Foundation
+import os.log
+
+private let log = Logger(subsystem: "com.niyora.companion", category: "ppg.signal")
 
 /// Processes a stream of per-frame green-channel means into HRV metrics.
 ///
@@ -92,9 +95,7 @@ struct PPGSignalProcessor {
     /// natural end (30s elapsed) from a finger-lifted abort.
     func computeResult(captureCompleted: Bool) -> PPGMeasurementResult {
         if !captureCompleted {
-            #if DEBUG
-            print("[PPGSignal] result=fingerLifted · capture aborted early")
-            #endif
+            log.info("result=fingerLifted · capture aborted early")
             return PPGMeasurementResult(
                 rmssdMs: nil, sdnnMs: nil,
                 sampleCount: 0, snrDb: nil,
@@ -102,9 +103,7 @@ struct PPGSignalProcessor {
             )
         }
         guard samples.count >= Int(Self.sampleRateHz * 5) else {
-            #if DEBUG
-            print("[PPGSignal] result=lowSignal · only \(samples.count) samples (<5s worth)")
-            #endif
+            log.info("result=lowSignal · only \(samples.count) samples (<5s worth)")
             return PPGMeasurementResult(
                 rmssdMs: nil, sdnnMs: nil,
                 sampleCount: 0, snrDb: nil,
@@ -127,14 +126,10 @@ struct PPGSignalProcessor {
         let rmssdValue = rmssd(ibisMs) ?? 0
         let sdnnValue = sdnn(ibisMs) ?? 0
 
-        #if DEBUG
-        print("[PPGSignal] samples=\(samples.count) peaks=\(peaks.count) ibis=\(ibisMs.count)/\(rawIbisMs.count) snrDb=\(String(format: "%.2f", snr)) hrBpm=\(String(format: "%.1f", heartRateBpm)) rmssdMs=\(String(format: "%.1f", rmssdValue)) sdnnMs=\(String(format: "%.1f", sdnnValue))")
-        #endif
+        log.debug("samples=\(samples.count) peaks=\(peaks.count) ibis=\(ibisMs.count)/\(rawIbisMs.count) snrDb=\(String(format: "%.2f", snr)) hrBpm=\(String(format: "%.1f", heartRateBpm)) rmssdMs=\(String(format: "%.1f", rmssdValue)) sdnnMs=\(String(format: "%.1f", sdnnValue))")
 
         guard ibisMs.count >= Self.minIbiCount else {
-            #if DEBUG
-            print("[PPGSignal] result=lowSignal · too few IBIs (\(ibisMs.count) < \(Self.minIbiCount))")
-            #endif
+            log.info("result=lowSignal · too few IBIs (\(ibisMs.count) < \(Self.minIbiCount))")
             return PPGMeasurementResult(
                 rmssdMs: nil, sdnnMs: nil,
                 sampleCount: UInt32(ibisMs.count),
@@ -143,9 +138,7 @@ struct PPGSignalProcessor {
             )
         }
         guard snr >= Self.minSnrDb else {
-            #if DEBUG
-            print("[PPGSignal] result=lowSignal · SNR \(String(format: "%.2f", snr)) < \(Self.minSnrDb)")
-            #endif
+            log.info("result=lowSignal · SNR \(String(format: "%.2f", snr)) < \(Self.minSnrDb)")
             return PPGMeasurementResult(
                 rmssdMs: nil, sdnnMs: nil,
                 sampleCount: UInt32(ibisMs.count),
@@ -162,9 +155,7 @@ struct PPGSignalProcessor {
         let humanLikelyHr = heartRateBpm >= 40 && heartRateBpm <= 180
         let humanLikelyRmssd = rmssdValue >= 5 && rmssdValue <= 250
         guard humanLikelyHr, humanLikelyRmssd else {
-            #if DEBUG
-            print("[PPGSignal] result=lowSignal · HR \(String(format: "%.1f", heartRateBpm)) or RMSSD \(String(format: "%.1f", rmssdValue)) outside physiologic range")
-            #endif
+            log.info("result=lowSignal · HR \(String(format: "%.1f", heartRateBpm)) or RMSSD \(String(format: "%.1f", rmssdValue)) outside physiologic range")
             return PPGMeasurementResult(
                 rmssdMs: nil, sdnnMs: nil,
                 sampleCount: UInt32(ibisMs.count),
@@ -173,9 +164,7 @@ struct PPGSignalProcessor {
             )
         }
 
-        #if DEBUG
-        print("[PPGSignal] result=ok")
-        #endif
+        log.info("result=ok")
         return PPGMeasurementResult(
             rmssdMs: rmssd(ibisMs),
             sdnnMs: sdnn(ibisMs),

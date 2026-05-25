@@ -2,6 +2,9 @@
 import AVFoundation
 import CoreVideo
 import UIKit
+import os.log
+
+private let log = Logger(subsystem: "com.niyora.companion", category: "ppg.capture")
 
 /// AVFoundation-based camera capture for PPG.
 ///
@@ -59,29 +62,23 @@ final class PPGCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
             object: session,
             queue: .main
         ) { note in
-            #if DEBUG
             let rawReason = note.userInfo?[AVCaptureSessionInterruptionReasonKey] as? Int ?? -1
-            print("[PPGCapture] session WAS INTERRUPTED · reason=\(rawReason) (\(Self.interruptionReasonName(rawReason)))")
-            #endif
+            log.info("session WAS INTERRUPTED · reason=\(rawReason) (\(Self.interruptionReasonName(rawReason)))")
         })
         observers.append(nc.addObserver(
             forName: AVCaptureSession.interruptionEndedNotification,
             object: session,
             queue: .main
         ) { _ in
-            #if DEBUG
-            print("[PPGCapture] session interruption ENDED")
-            #endif
+            log.info("session interruption ENDED")
         })
         observers.append(nc.addObserver(
             forName: AVCaptureSession.runtimeErrorNotification,
             object: session,
             queue: .main
         ) { note in
-            #if DEBUG
             let err = note.userInfo?[AVCaptureSessionErrorKey]
-            print("[PPGCapture] session RUNTIME ERROR · \(String(describing: err))")
-            #endif
+            log.error("session RUNTIME ERROR · \(String(describing: err))")
         })
     }
 
@@ -89,7 +86,6 @@ final class PPGCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         for o in observers { NotificationCenter.default.removeObserver(o) }
     }
 
-    #if DEBUG
     private static func interruptionReasonName(_ raw: Int) -> String {
         switch raw {
         case 1: return "videoDeviceNotAvailableInBackground"
@@ -100,7 +96,6 @@ final class PPGCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         default: return "unknown"
         }
     }
-    #endif
 
     /// Start a capture. Returns once the session is running with the
     /// torch on, or throws if the camera or torch is unavailable.
@@ -184,9 +179,7 @@ final class PPGCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         // Each attempt verifies that iOS actually activated the LED
         // and retries if not. Falls back to .on (max level) if the
         // level-based API fails outright.
-        #if DEBUG
-        print("[PPGCapture] pre-torch · hasTorch=\(dev.hasTorch) isTorchAvailable=\(dev.isTorchAvailable) supportsOn=\(dev.isTorchModeSupported(.on)) isTorchActive=\(dev.isTorchActive)")
-        #endif
+        log.debug("pre-torch · hasTorch=\(dev.hasTorch) isTorchAvailable=\(dev.isTorchAvailable) supportsOn=\(dev.isTorchModeSupported(.on)) isTorchActive=\(dev.isTorchActive)")
         var torchActivated = false
         for attempt in 0..<3 {
             do {
@@ -211,14 +204,10 @@ final class PPGCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
             }
             if dev.isTorchActive {
                 torchActivated = true
-                #if DEBUG
-                print("[PPGCapture] post-torch · attempt=\(attempt) torchMode=\(dev.torchMode.rawValue) isTorchActive=true torchLevel=\(dev.torchLevel)")
-                #endif
+                log.info("post-torch · attempt=\(attempt) torchMode=\(dev.torchMode.rawValue) isTorchActive=true torchLevel=\(dev.torchLevel)")
                 break
             }
-            #if DEBUG
-            print("[PPGCapture] post-torch · attempt=\(attempt) torchMode=\(dev.torchMode.rawValue) isTorchActive=false torchLevel=\(dev.torchLevel) · retrying")
-            #endif
+            log.error("post-torch · attempt=\(attempt) torchMode=\(dev.torchMode.rawValue) isTorchActive=false torchLevel=\(dev.torchLevel) · retrying")
         }
         if !torchActivated {
             throw StartError.configurationFailed("The flashlight would not turn on. Close other apps that might be using the camera, then try again.")
@@ -260,9 +249,7 @@ final class PPGCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
                 }
             }
             dev.unlockForConfiguration()
-            #if DEBUG
-            print("[PPGCapture] torch re-armed · isTorchActive=\(dev.isTorchActive) torchLevel=\(dev.torchLevel)")
-            #endif
+            log.info("torch re-armed · isTorchActive=\(dev.isTorchActive) torchLevel=\(dev.torchLevel)")
         } catch {
             // Best-effort. If we can't lock, try again on the next tick.
         }

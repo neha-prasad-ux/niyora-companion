@@ -1,6 +1,9 @@
 #if NIYORA_V1_PPG_ENABLED
 import Foundation
 import UIKit
+import os.log
+
+private let log = Logger(subsystem: "com.niyora.companion", category: "measurement")
 
 /// Drives one 30s PPG capture from start to result. Owned by the
 /// presenting view; the view subscribes to `state` (Observation) to
@@ -118,11 +121,9 @@ final class MeasurementController {
             return
         }
         fingerOnLens = processor.fingerLikelyOnLens()
-        #if DEBUG
         if case .placingFinger = state, processor.samples.count % 15 == 0 {
-            print("[MeasureCtrl] frame · green=\(String(format: "%.1f", green)) red=\(String(format: "%.1f", red)) ratio=\(green > 0 ? String(format: "%.2f", red / green) : "n/a") fingerOnLens=\(fingerOnLens)")
+            log.debug("frame · green=\(String(format: "%.1f", green)) red=\(String(format: "%.1f", red)) ratio=\(green > 0 ? String(format: "%.2f", red / green) : "n/a") fingerOnLens=\(fingerOnLens)")
         }
-        #endif
 
         switch state {
         case .placingFinger:

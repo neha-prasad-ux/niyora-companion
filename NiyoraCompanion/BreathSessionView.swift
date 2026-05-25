@@ -1,5 +1,8 @@
 import SwiftUI
 import AVFoundation
+import os.log
+
+private let log = Logger(subsystem: "com.niyora.companion", category: "breath")
 
 /// Full breath session flow: pre-session info → animated session →
 /// post-session mood capture. Persists the completed session via
@@ -332,7 +335,7 @@ private class SessionController: ObservableObject {
             audioPlayer?.numberOfLoops = -1
             audioPlayer?.play()
         } catch {
-            print("Audio playback failed: \(error)")
+            log.error("audio playback failed: \(error.localizedDescription)")
         }
     }
 }
