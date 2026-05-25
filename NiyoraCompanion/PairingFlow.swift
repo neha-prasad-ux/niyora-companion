@@ -22,6 +22,8 @@ final class PairingFlow {
         case paired(serverName: String)
         case measuring(serverName: String, sessionId: String, phase: MeasurementPhase)
         case failed(reason: String)
+        /// User chose "Continue without a Mac" in onboarding or Settings.
+        case skipped
     }
 
     /// One measurement the sheet should drive. Either Mac-initiated
@@ -87,6 +89,20 @@ final class PairingFlow {
             secret: KeychainStore.loadSecret(forServerId: known.serverId),
             pairingId: nil
         )
+    }
+
+    /// User tapped "Continue without a Mac" in onboarding or Settings.
+    /// Cancels any in-progress connection and marks the flow as skipped
+    /// so the presenting view can advance.
+    func skip() {
+        runTask?.cancel()
+        runTask = nil
+        let conn = connection
+        connection = nil
+        seenRequests.removeAll()
+        pendingRequest = nil
+        Task { await conn?.cancel() }
+        state = .skipped
     }
 
     func disconnect() {

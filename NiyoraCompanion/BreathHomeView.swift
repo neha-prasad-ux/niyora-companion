@@ -73,6 +73,15 @@ struct BreathHomeView: View {
         .sheet(isPresented: $showMySoul) {
             MySoulSheet(completedSessions: completedSessions)
         }
+        .onChange(of: NotificationRouter.shared.pendingTechnique) { _, name in
+            guard let name else { return }
+            let count = LocalSessionStore.completedCount()
+            let tier = Tier.current(completedSessions: count)
+            if let match = unlockedTechniques(tier: tier).first(where: { $0.name == name }) {
+                technique = match
+            }
+            NotificationRouter.shared.pendingTechnique = nil
+        }
     }
 
     // MARK: - Top status row

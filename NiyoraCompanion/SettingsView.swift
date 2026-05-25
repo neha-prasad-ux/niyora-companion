@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 
 /// Settings section embedded in the My Soul tab. Three sections:
 /// 1. Reminder schedule (multi-time picker)
@@ -8,6 +9,9 @@ struct SettingsView: View {
     @Binding var flow: PairingFlow
     @State private var reminderTimes: [Date] = []
     @State private var showingTimePicker = false
+    @State private var notificationStatus: UNAuthorizationStatus = .notDetermined
+    @State private var showPairingSheet = false
+    @State private var connectMacFlow = PairingFlow()
 
     private let defaultReminders: [Date] = {
         let calendar = Calendar.current
@@ -50,8 +54,14 @@ struct SettingsView: View {
             } header: {
                 Text("Reminders")
             } footer: {
-                Text("Choose times when you want to be reminded to check in. Actual scheduling happens when notifications are implemented.")
-                    .font(.caption2)
+                if notificationStatus == .denied {
+                    Text("Notifications: denied — enable in iOS Settings to receive reminders.")
+                        .font(.caption2)
+                        .foregroundStyle(.red.opacity(0.85))
+                } else {
+                    Text("Choose times when you want to be reminded to check in.")
+                        .font(.caption2)
+                }
             }
 
             Section("Pair status") {
@@ -88,7 +98,8 @@ struct SettingsView: View {
                         Text("Not paired")
                             .foregroundStyle(.secondary)
                         Button("Connect a Mac") {
-                            // Placeholder until the sibling Pair issue lands
+                            connectMacFlow = PairingFlow()
+                            showPairingSheet = true
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
@@ -107,8 +118,18 @@ struct SettingsView: View {
         .sheet(isPresented: $showingTimePicker) {
             timePickerSheet
         }
+        .sheet(isPresented: $showPairingSheet) {
+            PairingSheetView(
+                flow: $connectMacFlow,
+                onPaired: { showPairingSheet = false },
+                onSkipped: { showPairingSheet = false }
+            )
+        }
         .onAppear {
             loadReminders()
+            Task {
+                notificationStatus = await ReminderScheduler.shared.authorizationStatus()
+            }
         }
     }
 
@@ -170,5 +191,13 @@ struct SettingsView: View {
         let isoStrings = reminderTimes.map { iso.string(from: $0) }
         guard let data = try? JSONEncoder().encode(isoStrings) else { return }
         UserDefaults.standard.set(data, forKey: "niyora.reminders.schedule")
+
+        let comps = reminderTimes.map {
+            Calendar.current.dateComponents([.hour, .minute], from: $0)
+        }
+        Task {
+            await ReminderScheduler.shared.schedule(times: comps)
+            notificationStatus = await ReminderScheduler.shared.authorizationStatus()
+        }
     }
 }
