@@ -47,15 +47,15 @@ struct BreathHomeView: View {
                 orbView
                 Spacer(minLength: 8)
 
-                // Bottom block: technique caption + actions, anchored at
-                // bottom with explicit home-indicator clearance so the
-                // Begin pill never hugs the safe-area edge.
+                // Bottom block: technique caption + actions. 12pt
+                // bottom inset gives Begin breathing room from the home
+                // indicator without leaving visible dead space.
                 VStack(spacing: 18) {
                     techniqueText
                     actions
                         .padding(.horizontal, 24)
                 }
-                .padding(.bottom, 24)
+                .padding(.bottom, 12)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -70,8 +70,8 @@ struct BreathHomeView: View {
                 }
             )
         }
-        .sheet(isPresented: $showMySoul) {
-            MySoulSheet(completedSessions: completedSessions)
+        .fullScreenCover(isPresented: $showMySoul) {
+            MySoulTabView(flow: .constant(PairingFlow()))
         }
     }
 
@@ -258,26 +258,6 @@ struct BreathHomeView: View {
         if let next = pool.randomElement() {
             technique = next
         }
-    }
-}
-
-/// Light placeholder presentation of MySoulTabView in a sheet from the
-/// top-left person icon. Keeps the My Soul surface reachable without
-/// the bottom tab bar.
-private struct MySoulSheet: View {
-    let completedSessions: Int
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            MySoulTabView(flow: .constant(PairingFlow()))
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button("Done") { dismiss() }
-                    }
-                }
-        }
-        .preferredColorScheme(.dark)
     }
 }
 

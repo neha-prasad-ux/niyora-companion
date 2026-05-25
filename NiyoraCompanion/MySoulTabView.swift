@@ -1,134 +1,202 @@
 import SwiftUI
 
-/// My Soul tab: displays current tier, tier progression, recent sessions,
-/// and embedded settings (reminders, pair status, privacy). The visual
-/// identity shifts per tier via hue/saturation changes.
+/// My Soul screen: presented full-screen from the home view's profile
+/// icon. Shows the current Soul tier as a 3D orb (matching the home
+/// view's rose orb language but coloured per tier) with Saturn-style
+/// rings per tier count, plus tier name and progression to next.
+///
+/// Brand language ports from the Mac app's My Soul panel (see
+/// niyora/app/src/Settings.tsx soul-planet + soul-ring styling).
+///
+/// Session history and embedded settings (reminders, pair status,
+/// privacy footer) per the v1 spec are tracked separately in
+/// niyora-companion#34 and will land in a follow-up pass.
 struct MySoulTabView: View {
     @Binding var flow: PairingFlow
+    @Environment(\.dismiss) private var dismiss
+
     @State private var sessions: [LocalSessionStore.Session] = []
     @State private var currentTier: Tier = .spark
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    tierCard
-                }
-                .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets())
+        ZStack {
+            backgroundGradient
+                .ignoresSafeArea()
 
-                Section("Recent sessions") {
-                    if sessions.isEmpty {
-                        Text("No sessions yet. Tap Measure stress to start.")
-                            .foregroundStyle(.secondary)
-                            .font(.callout)
-                    } else {
-                        ForEach(sessions.prefix(10)) { session in
-                            sessionRow(session)
-                        }
-                    }
-                }
+            VStack(spacing: 0) {
+                topBar
+                    .padding(.horizontal, 20)
+                    .padding(.top, 8)
 
-                Section("Settings") {
-                    SettingsView(flow: $flow)
-                }
+                Spacer(minLength: 16)
+
+                tierOrb
+
+                Spacer(minLength: 12)
+
+                tierLabel
+                    .padding(.bottom, 36)
             }
-            .navigationTitle("My Soul")
-            .onAppear {
-                loadData()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .preferredColorScheme(.dark)
+        .onAppear { loadData() }
+    }
+
+    // MARK: - Top bar
+
+    /// Mirrors `BreathHomeView.topBar` (profile · wordmark · close icon)
+    /// so the screen feels like a continuation of the home view.
+    private var topBar: some View {
+        HStack(spacing: 0) {
+            // Left placeholder to keep the wordmark visually centered.
+            Color.clear.frame(width: 44, height: 44)
+
+            Spacer()
+
+            HStack(spacing: 6) {
+                Circle()
+                    .strokeBorder(Color.white.opacity(0.7), lineWidth: 1.2)
+                    .frame(width: 10, height: 10)
+                    .overlay(
+                        Circle()
+                            .fill(Color.white.opacity(0.85))
+                            .frame(width: 4, height: 4)
+                    )
+                Text("My Soul")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.85))
+            }
+
+            Spacer()
+
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.7))
+                    .frame(width: 44, height: 44)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    // MARK: - Tier orb (3D rose-style, coloured per tier, with rings)
+
+    private var tierOrb: some View {
+        let core: CGFloat = 240
+        let halo: CGFloat = core * 1.05
+        let accent = currentTier.color
+        return ZStack {
+            // Soft outer halo in the tier accent
+            Circle()
+                .fill(
+                    RadialGradient(
+                        colors: [accent.opacity(0.30), accent.opacity(0)],
+                        center: .center,
+                        startRadius: 0,
+                        endRadius: halo * 0.55
+                    )
+                )
+                .frame(width: halo, height: halo)
+                .blur(radius: 6)
+
+            // Core orb with depth: bright highlight upper-left, mid
+            // tier-coloured body, deep edge. Same gradient pattern as
+            // the home view's rose orb, just remapped to tier hues.
+            Circle()
+                .fill(
+                    RadialGradient(
+                        colors: [
+                            accent.opacity(0.95),
+                            accent.opacity(0.55),
+                            accent.opacity(0.15),
+                        ],
+                        center: UnitPoint(x: 0.35, y: 0.30),
+                        startRadius: 4,
+                        endRadius: core * 0.6
+                    )
+                )
+                .frame(width: core, height: core)
+                .overlay(
+                    Circle()
+                        .strokeBorder(Color.black.opacity(0.15), lineWidth: 1)
+                )
+
+            // Saturn-style rings per tier count (Spark 0, Glow 1, Shine
+            // 2, Radiance 3, Brilliance 4). Matches Mac Settings.tsx.
+            ForEach(0..<ringCount, id: \.self) { i in
+                Ellipse()
+                    .stroke(accent.opacity(0.55 - Double(i) * 0.08), lineWidth: 1.4)
+                    .frame(
+                        width: core + CGFloat(i * 18) + 28,
+                        height: 28 + CGFloat(i * 4)
+                    )
+                    .shadow(color: accent.opacity(0.20), radius: 6)
             }
         }
     }
 
-    private var tierCard: some View {
-        VStack(spacing: 16) {
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                currentTier.color.opacity(0.3),
-                                currentTier.color.opacity(0.1)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 120, height: 120)
+    private var ringCount: Int {
+        switch currentTier {
+        case .spark:      return 0
+        case .glow:       return 1
+        case .shine:      return 2
+        case .radiance:   return 3
+        case .brilliance: return 4
+        }
+    }
 
-                Image(systemName: "sparkles")
-                    .font(.system(size: 48, weight: .light))
-                    .foregroundStyle(currentTier.color)
-            }
+    // MARK: - Tier label
 
-            VStack(spacing: 6) {
-                Text(currentTier.name)
-                    .font(.title.weight(.semibold))
-                    .foregroundStyle(currentTier.color)
+    private var tierLabel: some View {
+        VStack(spacing: 8) {
+            Text(currentTier.name)
+                .font(.system(size: 34, weight: .semibold))
+                .foregroundStyle(currentTier.color)
 
-                Text("\(sessions.count) session\(sessions.count == 1 ? "" : "s")")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
+            Text("\(completedCount) session\(completedCount == 1 ? "" : "s")")
+                .font(.system(size: 14, weight: .light))
+                .foregroundStyle(.white.opacity(0.5))
 
-            if let remaining = currentTier.sessionsToNext(currentCount: sessions.count) {
-                Text("\(remaining) more session\(remaining == 1 ? "" : "s") to \(nextTierName)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            if let remaining = currentTier.sessionsToNext(currentCount: completedCount),
+               let next = Tier(rawValue: currentTier.rawValue + 1) {
+                Text("\(remaining) more to \(next.name)")
+                    .font(.system(size: 13, weight: .light))
+                    .foregroundStyle(.white.opacity(0.4))
+                    .padding(.top, 6)
             } else {
                 Text("Maximum tier reached")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 13, weight: .light))
+                    .foregroundStyle(.white.opacity(0.4))
+                    .padding(.top, 6)
             }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 24)
     }
 
-    private var nextTierName: String {
-        guard let next = Tier(rawValue: currentTier.rawValue + 1) else {
-            return ""
-        }
-        return next.name
+    private var completedCount: Int {
+        sessions.filter(\.completed).count
     }
 
-    private func sessionRow(_ session: LocalSessionStore.Session) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Image(systemName: session.isStandalone ? "iphone" : "laptopcomputer")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                if !session.techniqueName.isEmpty {
-                    Text(session.techniqueName)
-                        .font(.subheadline.weight(.medium))
-                } else {
-                    Text(session.isStandalone ? "Phone check-in" : "Mac session")
-                        .font(.subheadline.weight(.medium))
-                }
-
-                Spacer()
-
-                Text(relativeTime(session.completedAtIso))
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            }
-        }
-        .padding(.vertical, 2)
-    }
+    // MARK: - Data
 
     private func loadData() {
         sessions = LocalSessionStore.all()
-        currentTier = Tier.forSessionCount(sessions.count)
+        currentTier = Tier.forSessionCount(completedCount)
     }
+}
 
-    private func relativeTime(_ isoString: String) -> String {
-        let iso = ISO8601DateFormatter()
-        guard let date = iso.date(from: isoString) else {
-            return isoString
-        }
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .short
-        return formatter.localizedString(for: date, relativeTo: Date())
-    }
+private let backgroundGradient = LinearGradient(
+    colors: [
+        Color(hue: 280.0 / 360.0, saturation: 0.25, brightness: 0.05),
+        Color(hue: 270.0 / 360.0, saturation: 0.20, brightness: 0.02),
+        Color.black,
+    ],
+    startPoint: .top,
+    endPoint: .bottom
+)
+
+#Preview {
+    MySoulTabView(flow: .constant(PairingFlow()))
 }
