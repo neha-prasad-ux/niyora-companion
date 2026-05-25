@@ -1,34 +1,15 @@
 import SwiftUI
 
-/// Top-level tab container for the v1 standalone app. Two tabs:
+/// Root of the v1 standalone app. No bottom tab bar: the home screen
+/// IS the pre-session info view (`BreathHomeView`). My Soul is reached
+/// from the top-left profile icon on the home screen.
 ///
-///   1. **Breath** · guided breathing sessions, backed by `BreathTabView`
-///      and the 14-technique catalog in `Techniques.swift`.
-///   2. **My Soul** · session history, tier progression, and embedded
-///      settings (reminders, pair status, privacy). Backed by
-///      `MySoulTabView`.
-///
-/// Replaces the old `ContentView` entry point, which was built around
-/// Mac pairing and PPG capture. That flow is preserved in source behind
-/// the `NIYORA_V1_PPG_ENABLED` flag for v2.
-///
-/// `PairingFlow` is held here so MySoulTabView's pair-status section can
-/// observe and act on the connection state without owning the lifecycle.
+/// The pairing / PPG flow from the v0 companion is preserved in source
+/// behind `NIYORA_V1_PPG_ENABLED` for v2.
 struct RootTabView: View {
-    @State private var flow = PairingFlow()
-
     var body: some View {
-        TabView {
-            BreathTabView()
-                .tabItem {
-                    Label("Breath", systemImage: "wind")
-                }
-
-            MySoulTabView(flow: $flow)
-                .tabItem {
-                    Label("My Soul", systemImage: "heart.text.square")
-                }
-        }
+        BreathHomeView()
+            .preferredColorScheme(.dark)
     }
 }
 
