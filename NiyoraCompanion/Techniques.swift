@@ -1,43 +1,8 @@
 import Foundation
 
-/// Tier progression for My Soul. Each tier unlocks a new set of
-/// breathing techniques and mindfulness moments.
-enum Tier: String, Codable {
-    case spark
-    case glow
-    case shine
-    case radiance
-    case brilliance
-
-    var name: String {
-        switch self {
-        case .spark: return "Spark"
-        case .glow: return "Glow"
-        case .shine: return "Shine"
-        case .radiance: return "Radiance"
-        case .brilliance: return "Brilliance"
-        }
-    }
-
-    /// Number of completed sessions needed to reach this tier.
-    var threshold: Int {
-        switch self {
-        case .spark: return 0
-        case .glow: return 5
-        case .shine: return 15
-        case .radiance: return 40
-        case .brilliance: return 80
-        }
-    }
-
-    static func current(completedSessions: Int) -> Tier {
-        if completedSessions >= 80 { return .brilliance }
-        if completedSessions >= 40 { return .radiance }
-        if completedSessions >= 15 { return .shine }
-        if completedSessions >= 5 { return .glow }
-        return .spark
-    }
-}
+// Tier lives in `Tiers.swift` (single canonical source of truth, ported from
+// `niyora/app/src/tiers.ts`). This file only defines techniques and their
+// `unlockTier`.
 
 /// HSL color for the particle renderer, stored as [hue, saturation, lightness].
 struct PhaseColor: Equatable {

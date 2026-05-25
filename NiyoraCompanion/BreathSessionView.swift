@@ -86,8 +86,8 @@ private struct PreSessionView: View {
             }
 
             VStack(alignment: .leading, spacing: 16) {
-                InfoBlock(title: "Instructions", body: technique.instructions)
-                InfoBlock(title: "Benefits", body: technique.benefits)
+                InfoBlock(title: "Instructions", text: technique.instructions)
+                InfoBlock(title: "Benefits", text: technique.benefits)
             }
             .padding(.horizontal, 24)
 
@@ -126,7 +126,7 @@ private struct PreSessionView: View {
 
 private struct InfoBlock: View {
     let title: String
-    let body: String
+    let text: String
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -134,7 +134,7 @@ private struct InfoBlock: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.white.opacity(0.5))
                 .textCase(.uppercase)
-            Text(body)
+            Text(text)
                 .font(.body)
                 .foregroundStyle(.white)
         }

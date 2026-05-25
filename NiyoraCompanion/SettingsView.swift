@@ -21,7 +21,7 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
-            Section("Reminders") {
+            Section {
                 if reminderTimes.isEmpty {
                     Text("No reminders set")
                         .foregroundStyle(.secondary)
@@ -47,6 +47,8 @@ struct SettingsView: View {
                 } label: {
                     Label("Add reminder", systemImage: "plus.circle")
                 }
+            } header: {
+                Text("Reminders")
             } footer: {
                 Text("Choose times when you want to be reminded to check in. Actual scheduling happens when notifications are implemented.")
                     .font(.caption2)
