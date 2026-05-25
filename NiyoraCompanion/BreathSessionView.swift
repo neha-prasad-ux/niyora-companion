@@ -326,7 +326,7 @@ private class SessionController: ObservableObject {
     private func playAudio(track: AudioTrack) {
         guard let url = track.url else { return }
         do {
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+            try AVAudioSession.sharedInstance().setCategory(.ambient, mode: .default)
             try AVAudioSession.sharedInstance().setActive(true)
             audioPlayer = try AVAudioPlayer(contentsOf: url)
             audioPlayer?.numberOfLoops = -1
