@@ -34,25 +34,30 @@ struct BreathHomeView: View {
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                // Top header block: anchored at top
+                // Top header block: anchored at top, just below status bar
                 VStack(spacing: 6) {
                     topBar
                         .padding(.horizontal, 20)
                     tagline
                 }
+                .padding(.top, 8)
 
                 // Middle: orb expands to fill available vertical space
                 Spacer(minLength: 8)
                 orbView
                 Spacer(minLength: 8)
 
-                // Bottom block: technique caption + actions, anchored at bottom
+                // Bottom block: technique caption + actions, anchored at
+                // bottom with explicit home-indicator clearance so the
+                // Begin pill never hugs the safe-area edge.
                 VStack(spacing: 18) {
                     techniqueText
                     actions
                         .padding(.horizontal, 24)
                 }
+                .padding(.bottom, 24)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .preferredColorScheme(.dark)
         .fullScreenCover(isPresented: $showSession) {
@@ -127,11 +132,10 @@ struct BreathHomeView: View {
     // MARK: - Orb
 
     private var orbView: some View {
-        // Core diameter sized so the orb dominates the canvas without
-        // pushing the begin button below the safe area. Halo blur was
-        // inflating the layout frame in earlier iterations so it sits
-        // tighter to the core here (1.1x).
-        let core: CGFloat = 280
+        // Core diameter sized to fit comfortably above the bottom
+        // actions block and below the top status row on iPhone 17 Pro
+        // proportions.
+        let core: CGFloat = 240
         let halo: CGFloat = core * 1.05
         return ZStack {
             // Outer halo
