@@ -1,7 +1,10 @@
 import Foundation
 
+// Tier colours match neha-prasad-ux/niyora src/tiers.ts (canonical).
+// Update both atomically if these change.
+
 // Tier lives in `Tiers.swift` (single canonical source of truth, ported from
-// `niyora/app/src/tiers.ts`). This file only defines techniques and their
+// `neha-prasad-ux/niyora src/tiers.ts`). This file only defines techniques and their
 // `unlockTier`.
 
 /// HSL color for the particle renderer, stored as [hue, saturation, lightness].
