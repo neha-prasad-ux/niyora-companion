@@ -144,6 +144,19 @@ final class PairingFlow {
                 queuedAtIso: ISO8601DateFormatter().string(from: Date())
             ))
         }
+
+        // Record the session in LocalSessionStore for tier progression and
+        // history display. Only create one session per unique sessionId,
+        // regardless of whether we captured pre, post, or both.
+        let techniqueName = pendingRequest?.techniqueName ?? ""
+        let isStandalone = pendingRequest?.isStandalone ?? false
+        LocalSessionStore.add(LocalSessionStore.Session(
+            sessionId: sessionId,
+            completedAtIso: ISO8601DateFormatter().string(from: Date()),
+            techniqueName: techniqueName,
+            isStandalone: isStandalone
+        ))
+
         pendingRequest = nil
         if case let .measuring(name, _, _) = state {
             state = .paired(serverName: name)

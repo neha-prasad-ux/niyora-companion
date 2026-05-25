@@ -1,12 +1,14 @@
 import SwiftUI
 
-/// The primary screen of Niyora Companion. Three states:
+/// The primary screen of Niyora Companion. Two tabs:
 ///
-/// 1. No Mac paired yet: introduction + a single "Connect to Mac" button
-///    that opens the QR scanner.
-/// 2. At least one Mac paired: paired status, last received request, and
-///    a small footer about how measurements work.
-/// 3. Scanning: full-screen camera preview with a cancel chip.
+/// 1. Home: Three states:
+///    - No Mac paired yet: introduction + a single "Connect to Mac" button
+///      that opens the QR scanner.
+///    - At least one Mac paired: paired status, last received request, and
+///      a small footer about how measurements work.
+///    - Scanning: full-screen camera preview with a cancel chip.
+/// 2. My Soul: Tier progression, session history, and settings.
 ///
 /// When the Mac sends a `request_measurement` frame, `MeasurementSheet`
 /// presents over the whole view to drive a 30s PPG capture.
@@ -23,19 +25,15 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        NavigationStack {
-            mainContent
-                .navigationTitle("Niyora Companion")
-                .toolbar {
-                    #if DEBUG
-                    ToolbarItem(placement: .topBarTrailing) {
-                        NavigationLink {
-                            HRVSpikeView()
-                        } label: {
-                            Image(systemName: "waveform.path.ecg")
-                        }
-                    }
-                    #endif
+        TabView {
+            homeTab
+                .tabItem {
+                    Label("Home", systemImage: "house")
+                }
+
+            MySoulTabView(flow: $flow)
+                .tabItem {
+                    Label("My Soul", systemImage: "sparkles")
                 }
         }
         .fullScreenCover(isPresented: $showingScanner) {
@@ -67,6 +65,24 @@ struct ContentView: View {
             case .connecting, .authenticating, .paired, .measuring:
                 break
             }
+        }
+    }
+
+    private var homeTab: some View {
+        NavigationStack {
+            mainContent
+                .navigationTitle("Niyora Companion")
+                .toolbar {
+                    #if DEBUG
+                    ToolbarItem(placement: .topBarTrailing) {
+                        NavigationLink {
+                            HRVSpikeView()
+                        } label: {
+                            Image(systemName: "waveform.path.ecg")
+                        }
+                    }
+                    #endif
+                }
         }
     }
 
@@ -173,6 +189,7 @@ struct ContentView: View {
                                 KeychainStore.deleteSecret(forServerId: server.serverId)
                                 KnownServerStore.remove(serverId: server.serverId)
                                 LocalMeasurementStore.clear()
+                                LocalSessionStore.clear()
                                 flow.disconnect()
                             }
                             .buttonStyle(.bordered)
