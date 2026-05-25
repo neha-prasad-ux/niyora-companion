@@ -152,32 +152,29 @@ private struct AnimatedSessionView: View {
 
     var body: some View {
         ZStack {
-            // Background color derived from the visual config
-            Color(hue: technique.visual.inhaleColor.h / 360.0,
-                  saturation: 0.2,
-                  brightness: 0.1)
-                .ignoresSafeArea()
+            // Niyora background: near-black with a faint indigo cast,
+            // matching the Mac app's session canvas backdrop.
+            LinearGradient(
+                colors: [
+                    Color(hue: 250.0 / 360.0, saturation: 0.35, brightness: 0.04),
+                    Color(hue: 260.0 / 360.0, saturation: 0.20, brightness: 0.02),
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+
+            BreathAnimationView(
+                technique: technique,
+                currentPhase: controller.currentPhase,
+                progress: controller.phaseProgress
+            )
+            .ignoresSafeArea()
 
             VStack {
                 Spacer()
-
-                // Main breath animation
-                BreathAnimationView(
-                    technique: technique,
-                    currentPhase: controller.currentPhase,
-                    progress: controller.phaseProgress
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                // Current instruction label
-                if let label = controller.currentLabel {
-                    Text(label)
-                        .font(.title2.weight(.medium))
-                        .foregroundStyle(.white)
-                        .padding(.bottom, 80)
-                }
-
-                Spacer()
+                phaseLabelStack
+                    .padding(.bottom, 96)
             }
         }
         .onAppear {
@@ -192,6 +189,26 @@ private struct AnimatedSessionView: View {
             }
         }
     }
+
+    /// Two-line phase label: the current action in a calm serif as the
+    /// heading, the next action smaller and dimmer below. Matches the Mac
+    /// app's "Inhale / then hold" visual hierarchy (ROADMAP #4).
+    private var phaseLabelStack: some View {
+        VStack(spacing: 6) {
+            if let label = controller.currentLabel {
+                Text(label)
+                    .font(.system(size: 40, weight: .light, design: .serif))
+                    .foregroundStyle(.white.opacity(0.92))
+                    .animation(.easeInOut(duration: 0.35), value: label)
+            }
+            if let nextLabel = controller.nextLabel {
+                Text("then \(nextLabel.lowercased())")
+                    .font(.system(.callout, design: .serif))
+                    .foregroundStyle(.white.opacity(0.45))
+                    .animation(.easeInOut(duration: 0.35), value: nextLabel)
+            }
+        }
+    }
 }
 
 /// Drives the session timeline: phases, rounds, audio, haptics.
@@ -199,6 +216,10 @@ private struct AnimatedSessionView: View {
 private class SessionController: ObservableObject {
     @Published var currentPhase: BreathPhase?
     @Published var currentLabel: String?
+    /// One-line preview of the next action ("then exhale", "then inhale").
+    /// Drives the secondary line below the current phase label so the user
+    /// always knows what's coming without having to count.
+    @Published var nextLabel: String?
     @Published var phaseProgress: Double = 0
     @Published var isComplete = false
 
@@ -254,15 +275,17 @@ private class SessionController: ObservableObject {
     private func updateBreathingPhase(_ t: BreathingTechnique) {
         let cycleLength = t.phases.map(\.duration).reduce(0, +)
         let totalElapsed = elapsed
-        let cycleIndex = Int(totalElapsed / cycleLength)
         let timeInCycle = totalElapsed.truncatingRemainder(dividingBy: cycleLength)
 
         var accumulated: TimeInterval = 0
-        for phase in t.phases {
+        for (idx, phase) in t.phases.enumerated() {
             if timeInCycle < accumulated + phase.duration {
                 let phaseElapsed = timeInCycle - accumulated
                 currentPhase = phase
                 currentLabel = phase.label
+                // Next phase wraps to the first phase of the next cycle.
+                let nextIdx = (idx + 1) % t.phases.count
+                nextLabel = t.phases[nextIdx].label
                 phaseProgress = phaseElapsed / phase.duration
 
                 // Fire haptic on phase transitions
@@ -277,10 +300,12 @@ private class SessionController: ObservableObject {
 
     private func updateMindfulnessPhase(_ t: MindfulnessTechnique) {
         var accumulated: TimeInterval = 0
-        for prompt in t.prompts {
+        for (idx, prompt) in t.prompts.enumerated() {
             if elapsed < accumulated + prompt.duration {
                 let phaseElapsed = elapsed - accumulated
                 currentLabel = prompt.text
+                // Mindfulness prompts do not loop. The last prompt has no next.
+                nextLabel = idx + 1 < t.prompts.count ? t.prompts[idx + 1].text : nil
                 phaseProgress = phaseElapsed / prompt.duration
                 return
             }
@@ -321,20 +346,49 @@ private struct BreathAnimationView: View {
 
     var body: some View {
         GeometryReader { geo in
-            let size = min(geo.size.width, geo.size.height) * 0.5
+            // The orb's resting size is the smaller dimension of the canvas
+            // (gives a generous, near-fullscreen presence). Scale modulates
+            // between 0.55 (fully exhaled) and 1.0 (fully inhaled).
+            let restSize = min(geo.size.width, geo.size.height) * 0.92
             ZStack {
+                // Outer halo: very soft, large, low-opacity glow that
+                // anchors the orb without competing with it.
                 Circle()
                     .fill(
                         RadialGradient(
-                            colors: [currentColor.opacity(0.8), currentColor.opacity(0.3)],
+                            colors: [
+                                currentColor.opacity(0.22),
+                                currentColor.opacity(0.0),
+                            ],
                             center: .center,
                             startRadius: 0,
-                            endRadius: size / 2
+                            endRadius: restSize * 0.7
                         )
                     )
-                    .frame(width: size * scale, height: size * scale)
-                    .animation(.easeInOut(duration: 0.5), value: scale)
-                    .animation(.easeInOut(duration: 0.5), value: currentColor)
+                    .frame(width: restSize * 1.4, height: restSize * 1.4)
+                    .scaleEffect(scale)
+                    .blur(radius: 18)
+
+                // Core orb with depth: bright highlight up-left, deeper
+                // edge bottom-right, matching the Mac app's planet feel.
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            colors: [
+                                currentColor.opacity(0.95),
+                                currentColor.opacity(0.55),
+                                currentColor.opacity(0.15),
+                            ],
+                            center: UnitPoint(x: 0.38, y: 0.32),
+                            startRadius: 0,
+                            endRadius: restSize / 2
+                        )
+                    )
+                    .frame(width: restSize, height: restSize)
+                    .scaleEffect(scale)
+                    .shadow(color: currentColor.opacity(0.45), radius: 40, x: 0, y: 0)
+                    .animation(.easeInOut(duration: 0.6), value: scale)
+                    .animation(.easeInOut(duration: 0.6), value: currentColor)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -362,11 +416,11 @@ private struct BreathAnimationView: View {
     }
 
     private var scale: Double {
-        guard let phase = currentPhase else { return 0.5 }
+        guard let phase = currentPhase else { return 0.55 }
         switch phase.type {
-        case .inhale: return 0.5 + (progress * 0.5)
-        case .hold: return 1.0
-        case .exhale: return 1.0 - (progress * 0.5)
+        case .inhale: return 0.55 + (progress * 0.45)
+        case .hold:   return 1.0
+        case .exhale: return 1.0 - (progress * 0.45)
         }
     }
 }
