@@ -1,3 +1,4 @@
+#if NIYORA_V1_PPG_ENABLED
 import Foundation
 import HealthKit
 
@@ -87,3 +88,4 @@ final class HealthKitManager {
         }
     }
 }
+#endif
