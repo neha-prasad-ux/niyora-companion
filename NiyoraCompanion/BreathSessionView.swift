@@ -121,6 +121,7 @@ private struct PreSessionView: View {
                 .foregroundStyle(.white.opacity(0.6))
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -495,6 +496,7 @@ private struct PostSessionView: View {
                 .foregroundStyle(.white.opacity(0.6))
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
