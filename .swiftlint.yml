@@ -1,0 +1,53 @@
+excluded:
+  - NiyoraCompanion.xcodeproj
+  - DerivedData
+  - build
+
+disabled_rules:
+  # SwiftUI Text() strings are user-facing prose and routinely exceed 120 chars;
+  # line length is enforced via code review rather than CI.
+  - line_length
+  # SwiftUI APIs use multiple trailing closures as an intentional pattern.
+  - multiple_closures_with_trailing_closure
+  # let _ = <observable> is a documented workaround for @Observable dependency
+  # registration — see ContentView.swift.
+  - redundant_discardable_let
+  # Trailing comma after the last element is a style preference, not a bug.
+  - trailing_comma
+
+opt_in_rules:
+  - empty_count
+  - empty_string
+  - explicit_init
+  - first_where
+  - toggle_bool
+
+# SwiftUI views are verbose by nature; these limits avoid false positives.
+file_length:
+  warning: 600
+  error: 1000
+
+function_body_length:
+  warning: 80
+  error: 150
+
+type_body_length:
+  warning: 300
+  error: 500
+
+cyclomatic_complexity:
+  warning: 15
+  error: 25
+
+identifier_name:
+  min_length:
+    warning: 1
+    error: 1
+  max_length:
+    warning: 60
+    error: 80
+  excluded:
+    - i
+    - x
+    - y
+    - id
