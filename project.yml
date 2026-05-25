@@ -30,9 +30,12 @@ targets:
     platform: iOS
     sources:
       - path: NiyoraCompanion
-      - path: NiyoraCompanion/Resources
-        type: folder
-        buildPhase: resources
+        excludes:
+          - "Resources/**"
+    # Resources folder is re-added when niyora-companion#18 lands the
+    # ambient audio mp3s. Excluding it for now avoids bundling a
+    # placeholder .gitkeep as a resource (which breaks Info.plist
+    # binding in code signing).
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.niyora.companion
