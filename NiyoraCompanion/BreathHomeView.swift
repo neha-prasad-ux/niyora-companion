@@ -1,24 +1,25 @@
 import SwiftUI
 
-/// Home screen for the iOS app. Mirrors the Mac app's pre-session info
-/// screen: top status row with profile + wordmark + mute, a big stress
-/// orb, technique name + subtitle, a violet "Begin" CTA, and a
-/// secondary "Try a different one" link that rotates through unlocked
-/// techniques.
+/// Niyora home (pre-session) screen for iOS.
 ///
-/// Replaces the BreathTabView list. v1 has no PPG / stress signals on
-/// iOS, so the orb uses the calm-state gradient by default. When the
-/// user later pairs with a Mac that has a real score, we can switch
-/// this to read from the paired-Mac status update.
+/// Layout contract (top-to-bottom in a single VStack):
+///   header → flex spacer → orb → label → flex spacer → actions
+///
+/// SwiftUI's default safe-area handling anchors the VStack inside the
+/// status bar at the top and the home indicator at the bottom. Two
+/// greedy `Spacer`s split the leftover vertical real-estate evenly
+/// around the orb so the screen never has a single big "dead zone"
+/// at one edge.
 struct BreathHomeView: View {
 
-    /// Initial random unlocked technique. Reseeded on app launch and
-    /// when the user taps "Try a different one".
     @State private var technique: Technique
     @State private var showSession = false
     @State private var showMySoul = false
     @State private var muted = false
     @State private var completedSessions: Int
+    @State private var breathPhase: CGFloat = 1.0
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init() {
         let count = LocalSessionStore.completedCount()
@@ -30,36 +31,24 @@ struct BreathHomeView: View {
 
     var body: some View {
         ZStack {
-            backgroundGradient
+            BackgroundLayer()
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                // Top header block: anchored at top, just below status bar
-                VStack(spacing: 6) {
-                    topBar
-                        .padding(.horizontal, 20)
-                    tagline
-                }
-                .padding(.top, 8)
-
-                // Middle: orb expands to fill available vertical space
+                header
                 Spacer(minLength: 8)
-                orbView
+                orb
+                techniqueLabel
+                    .padding(.top, 18)
+                    .padding(.horizontal, 24)
                 Spacer(minLength: 8)
-
-                // Bottom block: technique caption + actions. 12pt
-                // bottom inset gives Begin breathing room from the home
-                // indicator without leaving visible dead space.
-                VStack(spacing: 18) {
-                    techniqueText
-                    actions
-                        .padding(.horizontal, 24)
-                }
-                .padding(.bottom, 12)
+                actions
+                    .padding(.horizontal, 24)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .preferredColorScheme(.dark)
+        .dynamicTypeSize(...DynamicTypeSize.xLarge)
+        .onAppear(perform: startBreathingLoop)
         .fullScreenCover(isPresented: $showSession) {
             BreathSessionView(
                 technique: technique,
@@ -71,137 +60,174 @@ struct BreathHomeView: View {
             )
         }
         .fullScreenCover(isPresented: $showMySoul) {
-            MySoulTabView(flow: .constant(PairingFlow()))
+            MySoulSheet()
         }
     }
 
-    // MARK: - Top status row
+    // MARK: - Header
 
-    private var topBar: some View {
-        HStack(spacing: 0) {
-            Button {
-                showMySoul = true
-            } label: {
-                Image(systemName: "person")
-                    .font(.system(size: 22, weight: .regular))
-                    .foregroundStyle(.white.opacity(0.7))
-                    .frame(width: 44, height: 44)
+    private var header: some View {
+        VStack(spacing: 6) {
+            ZStack {
+                // Centered wordmark
+                HStack(spacing: 7) {
+                    Circle()
+                        .strokeBorder(Color.white.opacity(0.7), lineWidth: 1.2)
+                        .frame(width: 11, height: 11)
+                        .overlay(
+                            Circle()
+                                .fill(Color.white.opacity(0.85))
+                                .frame(width: 4, height: 4)
+                        )
+                    Text("NIYORA")
+                        .font(.system(size: 13, weight: .medium))
+                        .tracking(3)
+                        .foregroundStyle(.white.opacity(0.7))
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityLabel("Niyora")
+
+                // Left + right icon buttons overlay
+                HStack {
+                    Button {
+                        showMySoul = true
+                    } label: {
+                        Image(systemName: "person")
+                            .font(.system(size: 20, weight: .regular))
+                            .foregroundStyle(.white.opacity(0.65))
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("My Soul")
+
+                    Spacer()
+
+                    Button {
+                        muted.toggle()
+                        Haptics.selection()
+                    } label: {
+                        Image(systemName: muted ? "speaker.slash" : "speaker.wave.2")
+                            .font(.system(size: 16, weight: .regular))
+                            .foregroundStyle(.white.opacity(0.65))
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(muted ? "Unmute" : "Mute")
+                }
             }
-            .buttonStyle(.plain)
+            .padding(.horizontal, 12)
+            .frame(height: 44)
 
-            Spacer()
-
-            HStack(spacing: 6) {
-                // Niyora wordmark dot. Solid filled circle; the radio
-                // "outlined" look in the reference is the focus ring
-                // around a small disc.
-                Circle()
-                    .strokeBorder(Color.white.opacity(0.7), lineWidth: 1.2)
-                    .frame(width: 10, height: 10)
-                    .overlay(
-                        Circle()
-                            .fill(Color.white.opacity(0.85))
-                            .frame(width: 4, height: 4)
-                    )
-                Text("Niyora")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.85))
-            }
-
-            Spacer()
-
-            Button {
-                muted.toggle()
-            } label: {
-                Image(systemName: muted ? "speaker.slash" : "speaker.wave.2")
-                    .font(.system(size: 16, weight: .regular))
-                    .foregroundStyle(.white.opacity(0.7))
-                    .frame(width: 36, height: 36)
-            }
-            .buttonStyle(.plain)
+            Text("Calm in 60 seconds")
+                .font(.system(size: 11, weight: .light))
+                .tracking(0.4)
+                .foregroundStyle(.white.opacity(0.4))
         }
-    }
-
-    private var tagline: some View {
-        Text("Calm in 60 seconds")
-            .font(.system(size: 12, weight: .light))
-            .foregroundStyle(.white.opacity(0.45))
-            .tracking(0.3)
     }
 
     // MARK: - Orb
 
-    private var orbView: some View {
-        // Core diameter sized to fit comfortably above the bottom
-        // actions block and below the top status row on iPhone 17 Pro
-        // proportions.
-        let core: CGFloat = 240
-        let halo: CGFloat = core * 1.05
+    /// Fixed 210pt orb. Largest hero size that lets the BEGIN button
+    /// clear the iPhone 17 Pro bottom safe area without clipping.
+    /// Anything bigger (220+) starts cutting into the BEGIN curve.
+    private var orb: some View {
+        let core: CGFloat = 210
+        let halo: CGFloat = core * 1.15
+
         return ZStack {
-            // Outer halo
             Circle()
                 .fill(
                     RadialGradient(
                         colors: [
-                            Color(hue: 350.0 / 360.0, saturation: 0.35, brightness: 0.85).opacity(0.30),
-                            Color(hue: 350.0 / 360.0, saturation: 0.20, brightness: 0.40).opacity(0.0),
+                            BrandColors.orbGlow.opacity(0.35),
+                            BrandColors.orbGlow.opacity(0.12),
+                            Color.clear
                         ],
                         center: .center,
-                        startRadius: 0,
-                        endRadius: halo * 0.55
+                        startRadius: core * 0.45,
+                        endRadius: halo * 0.5
                     )
                 )
                 .frame(width: halo, height: halo)
-                .blur(radius: 6)
+                .blur(radius: 14)
 
-            // Core orb (pearl rose: bright highlight upper-left,
-            // mid rose body, deep mauve edge — same palette as the
-            // Mac app's calm-state stress ball).
             Circle()
                 .fill(
                     RadialGradient(
                         colors: [
-                            Color(red: 1.00, green: 0.96, blue: 0.96),       // highlight
-                            Color(red: 0.95, green: 0.80, blue: 0.83),       // mid rose
-                            Color(red: 0.55, green: 0.34, blue: 0.42),       // edge mauve
+                            BrandColors.orbHighlight,
+                            BrandColors.orbMid,
+                            BrandColors.orbEdge
                         ],
                         center: UnitPoint(x: 0.35, y: 0.30),
-                        startRadius: 4,
-                        endRadius: core * 0.6
+                        startRadius: 0,
+                        endRadius: core * 0.55
                     )
                 )
-                .frame(width: core, height: core)
                 .overlay(
-                    // Subtle inner edge darkening for depth
                     Circle()
-                        .strokeBorder(Color.black.opacity(0.15), lineWidth: 1)
+                        .fill(
+                            RadialGradient(
+                                colors: [
+                                    Color.white.opacity(0.45),
+                                    Color.white.opacity(0.18),
+                                    Color.clear
+                                ],
+                                center: UnitPoint(x: 0.28, y: 0.22),
+                                startRadius: 0,
+                                endRadius: core * 0.42
+                            )
+                        )
                 )
+                .overlay(
+                    Circle()
+                        .stroke(Color.black.opacity(0.25), lineWidth: 10)
+                        .blur(radius: 10)
+                        .offset(x: -6, y: -4)
+                        .mask(Circle())
+                )
+                .frame(width: core, height: core)
+                .shadow(color: BrandColors.orbGlow.opacity(0.5), radius: 18, x: 0, y: 0)
         }
         .frame(width: halo, height: halo)
+        .scaleEffect(breathPhase)
+        .accessibilityHidden(true)
+    }
+
+    private func startBreathingLoop() {
+        guard !reduceMotion else { return }
+        withAnimation(.easeInOut(duration: 5.5).repeatForever(autoreverses: true)) {
+            breathPhase = 1.04
+        }
     }
 
     // MARK: - Technique label
 
-    private var techniqueText: some View {
+    private var techniqueLabel: some View {
         VStack(spacing: 6) {
             Text(technique.name)
-                .font(.system(size: 26, weight: .semibold))
-                .foregroundStyle(.white)
+                .font(.system(size: 24, weight: .semibold))
+                .tracking(0.3)
+                .foregroundStyle(.white.opacity(0.95))
                 .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .minimumScaleFactor(0.85)
 
             Text(techniqueSubtitle)
                 .font(.system(size: 13, weight: .light))
-                .foregroundStyle(.white.opacity(0.5))
+                .tracking(0.3)
+                .foregroundStyle(.white.opacity(0.55))
                 .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
+                .lineLimit(1)
         }
+        .accessibilityElement(children: .combine)
     }
 
-    /// Shortened subtitle: "<intent> <duration>s" so the line stays calm.
     private var techniqueSubtitle: String {
         let durationSec = Int(technique.duration.rounded())
-        // Strip any trailing "· Ns" from the existing subtitle so we
-        // don't double up.
         let raw = technique.subtitle
         let cleaned: String
         if let dotIdx = raw.range(of: "·") {
@@ -209,48 +235,56 @@ struct BreathHomeView: View {
         } else {
             cleaned = raw
         }
-        return "\(cleaned) \(durationSec)s"
+        return "\(cleaned) · \(durationSec)s"
     }
 
     // MARK: - Actions
 
     private var actions: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 14) {
             Button {
+                Haptics.selection()
                 rotateTechnique()
             } label: {
                 Text("Try a different one")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.7))
+                    .font(.system(size: 13, weight: .light))
+                    .tracking(0.4)
+                    .foregroundStyle(.white.opacity(0.6))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityHint("Choose another technique")
 
             Button {
+                Haptics.impact(.soft)
                 showSession = true
             } label: {
-                Text("Begin")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(.white)
+                Text("BEGIN")
+                    .font(.system(size: 15, weight: .medium))
+                    .tracking(2.0)
+                    .foregroundStyle(.white.opacity(0.95))
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
+                    .padding(.vertical, 14)
                     .background(
                         LinearGradient(
-                            colors: [
-                                Color(hue: 270.0 / 360.0, saturation: 0.55, brightness: 0.55),
-                                Color(hue: 280.0 / 360.0, saturation: 0.50, brightness: 0.45),
-                            ],
+                            colors: [BrandColors.beginTop, BrandColors.beginBottom],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
                     )
-                    .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-                    .shadow(color: Color(hue: 270.0 / 360.0, saturation: 0.5, brightness: 0.4).opacity(0.4), radius: 14, x: 0, y: 6)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 26, style: .continuous)
+                            .strokeBorder(BrandColors.beginBorder, lineWidth: 1)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+                    .shadow(color: BrandColors.beginGlow.opacity(0.35), radius: 18, x: 0, y: 4)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(BeginButtonStyle())
+            .accessibilityLabel("Begin \(technique.name)")
         }
     }
-
-    // MARK: - Rotation
 
     private func rotateTechnique() {
         let tier = Tier.current(completedSessions: completedSessions)
@@ -261,15 +295,75 @@ struct BreathHomeView: View {
     }
 }
 
-private let backgroundGradient = LinearGradient(
-    colors: [
-        Color(hue: 280.0 / 360.0, saturation: 0.25, brightness: 0.05),
-        Color(hue: 270.0 / 360.0, saturation: 0.20, brightness: 0.02),
-        Color.black,
-    ],
-    startPoint: .top,
-    endPoint: .bottom
-)
+// MARK: - Background
+
+private struct BackgroundLayer: View {
+    var body: some View {
+        LinearGradient(
+            colors: [
+                Color(hue: 250.0 / 360.0, saturation: 0.30, brightness: 0.06),
+                Color(hue: 260.0 / 360.0, saturation: 0.20, brightness: 0.03),
+                .black
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+    }
+}
+
+// MARK: - Begin button style
+
+private struct BeginButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
+            .opacity(configuration.isPressed ? 0.92 : 1.0)
+            .animation(.easeOut(duration: 0.15), value: configuration.isPressed)
+    }
+}
+
+// MARK: - Brand colors (calm-tier palette ported from Mac App.css)
+
+private enum BrandColors {
+    static let orbHighlight = Color.white.opacity(0.97)
+    static let orbMid       = Color(hue: 220.0 / 360.0, saturation: 0.045, brightness: 0.94)
+    static let orbEdge      = Color(hue: 220.0 / 360.0, saturation: 0.27,  brightness: 0.83)
+    static let orbGlow      = Color(hue: 220.0 / 360.0, saturation: 0.31,  brightness: 0.89)
+
+    static let beginTop    = Color(hue: 270.0 / 360.0, saturation: 0.67, brightness: 0.675).opacity(0.95)
+    static let beginBottom = Color(hue: 280.0 / 360.0, saturation: 0.57, brightness: 0.49).opacity(0.95)
+    static let beginBorder = Color(hue: 270.0 / 360.0, saturation: 0.36, brightness: 0.71).opacity(0.30)
+    static let beginGlow   = Color(hue: 270.0 / 360.0, saturation: 0.50, brightness: 0.40)
+}
+
+// MARK: - Haptics
+
+private enum Haptics {
+    static func selection() {
+        UISelectionFeedbackGenerator().selectionChanged()
+    }
+    static func impact(_ style: UIImpactFeedbackGenerator.FeedbackStyle) {
+        UIImpactFeedbackGenerator(style: style).impactOccurred()
+    }
+}
+
+// MARK: - My Soul sheet
+
+private struct MySoulSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            MySoulTabView(flow: .constant(PairingFlow()))
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") { dismiss() }
+                    }
+                }
+        }
+        .preferredColorScheme(.dark)
+    }
+}
 
 #Preview {
     BreathHomeView()

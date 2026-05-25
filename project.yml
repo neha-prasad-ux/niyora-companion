@@ -50,3 +50,46 @@ targets:
         # Fill this in with your Apple Developer team ID (Xcode > Settings >
         # Accounts, or the membership page). Without it, signing fails.
         # DEVELOPMENT_TEAM: XXXXXXXXXX
+
+  NiyoraCompanionTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: NiyoraCompanionTests
+    dependencies:
+      - target: NiyoraCompanion
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.niyora.companion.tests
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: "YES"
+
+  NiyoraCompanionUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: NiyoraCompanionUITests
+    dependencies:
+      - target: NiyoraCompanion
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.niyora.companion.uitests
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: "YES"
+        TEST_TARGET_NAME: NiyoraCompanion
+
+schemes:
+  NiyoraCompanion:
+    build:
+      targets:
+        NiyoraCompanion: all
+        NiyoraCompanionTests: [test]
+        NiyoraCompanionUITests: [test]
+    test:
+      targets:
+        - NiyoraCompanionTests
+        - NiyoraCompanionUITests
+    run:
+      config: Debug
+    archive:
+      config: Release
