@@ -12,3 +12,6 @@ xcuserdata/
 # Swift Package Manager
 .swiftpm/
 .build/
+
+# Bundler local gem cache (pinned versions live in Gemfile.lock)
+vendor/bundle/

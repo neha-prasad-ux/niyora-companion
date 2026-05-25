@@ -1,0 +1,44 @@
+default_platform(:ios)
+
+platform :ios do
+  desc "Build + upload beta to TestFlight"
+  lane :beta do
+    increment_build_number(
+      build_number: latest_testflight_build_number(version: get_version_number) + 1
+    )
+    sh("cd .. && xcodegen generate")
+    build_app(
+      project: "NiyoraCompanion.xcodeproj",
+      scheme: "NiyoraCompanion",
+      export_method: "app-store",
+      output_directory: "build",
+    )
+    changelog = File.exist?("../CHANGELOG.md") \
+      ? File.read("../CHANGELOG.md").split("\n")[0..30].join("\n") \
+      : nil
+    upload_to_testflight(
+      skip_waiting_for_build_processing: true,
+      changelog: changelog,
+    )
+  end
+
+  desc "Build + upload release to App Store Connect (manual review submission)"
+  lane :release do
+    increment_build_number(
+      build_number: latest_testflight_build_number(version: get_version_number) + 1
+    )
+    sh("cd .. && xcodegen generate")
+    build_app(
+      project: "NiyoraCompanion.xcodeproj",
+      scheme: "NiyoraCompanion",
+      export_method: "app-store",
+      output_directory: "build",
+    )
+    upload_to_app_store(
+      submit_for_review: false,
+      automatic_release: false,
+      skip_screenshots: true,
+      skip_metadata: true,
+    )
+  end
+end
