@@ -150,10 +150,13 @@ final class PairingFlow {
         // regardless of whether we captured pre, post, or both.
         let techniqueName = pendingRequest?.techniqueName ?? ""
         let isStandalone = pendingRequest?.isStandalone ?? false
-        LocalSessionStore.add(LocalSessionStore.Session(
-            sessionId: sessionId,
-            completedAtIso: ISO8601DateFormatter().string(from: Date()),
+        LocalSessionStore.add(session: LocalSessionStore.Session(
+            id: sessionId,
             techniqueName: techniqueName,
+            duration: 30, // PPG capture is fixed at 30s per the spec
+            completed: true,
+            timestamp: Date(),
+            mood: nil,
             isStandalone: isStandalone
         ))
 
