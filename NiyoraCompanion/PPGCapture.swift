@@ -1,3 +1,4 @@
+#if NIYORA_V1_PPG_ENABLED
 import AVFoundation
 import CoreVideo
 import UIKit
@@ -329,3 +330,4 @@ final class PPGCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         return (Double(sumG) / Double(count), Double(sumR) / Double(count))
     }
 }
+#endif

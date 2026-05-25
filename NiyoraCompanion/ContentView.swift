@@ -1,3 +1,4 @@
+#if NIYORA_V1_PPG_ENABLED
 import SwiftUI
 
 /// The primary screen of Niyora Companion. Two tabs:
@@ -330,3 +331,4 @@ struct ContentView: View {
 #Preview {
     ContentView()
 }
+#endif

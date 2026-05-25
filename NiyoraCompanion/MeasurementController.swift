@@ -1,3 +1,4 @@
+#if NIYORA_V1_PPG_ENABLED
 import Foundation
 import UIKit
 
@@ -260,3 +261,4 @@ final class MeasurementController {
         return error.localizedDescription
     }
 }
+#endif

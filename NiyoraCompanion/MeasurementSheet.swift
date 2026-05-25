@@ -1,3 +1,4 @@
+#if NIYORA_V1_PPG_ENABLED
 import SwiftUI
 
 /// Full-screen sheet shown for the duration of a PPG capture. The
@@ -523,3 +524,4 @@ private struct NiyoraOrb: View {
         }
     }
 }
+#endif

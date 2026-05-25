@@ -1,3 +1,4 @@
+#if NIYORA_V1_PPG_ENABLED
 import AVFoundation
 import SwiftUI
 import UIKit
@@ -35,3 +36,4 @@ struct CameraPreview: UIViewRepresentable {
         }
     }
 }
+#endif

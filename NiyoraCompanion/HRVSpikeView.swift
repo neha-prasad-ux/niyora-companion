@@ -1,4 +1,4 @@
-#if DEBUG
+#if NIYORA_V1_PPG_ENABLED && DEBUG
 import SwiftUI
 
 /// The original M1-2 HealthKit spike screen. Kept only in DEBUG builds
