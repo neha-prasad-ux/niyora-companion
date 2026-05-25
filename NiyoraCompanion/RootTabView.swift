@@ -2,11 +2,11 @@ import SwiftUI
 
 /// Top-level tab container for the v1 standalone app. Two tabs:
 ///
-///   1. **Breath** · placeholder until BreathTabView lands (sibling PR #15
-///      adds it). After both PRs merge, the breath placeholder is replaced
-///      by `BreathTabView()` in `RootTabView`.
-///   2. **My Soul** · backed by `MySoulTabView` (introduced in this PR).
-///      Owns the embedded settings (reminders, pair status, privacy).
+///   1. **Breath** · guided breathing sessions, backed by `BreathTabView`
+///      and the 14-technique catalog in `Techniques.swift`.
+///   2. **My Soul** · session history, tier progression, and embedded
+///      settings (reminders, pair status, privacy). Backed by
+///      `MySoulTabView`.
 ///
 /// Replaces the old `ContentView` entry point, which was built around
 /// Mac pairing and PPG capture. That flow is preserved in source behind
@@ -19,7 +19,7 @@ struct RootTabView: View {
 
     var body: some View {
         TabView {
-            breathPlaceholder
+            BreathTabView()
                 .tabItem {
                     Label("Breath", systemImage: "wind")
                 }
@@ -28,25 +28,6 @@ struct RootTabView: View {
                 .tabItem {
                     Label("My Soul", systemImage: "heart.text.square")
                 }
-        }
-    }
-
-    private var breathPlaceholder: some View {
-        NavigationStack {
-            VStack(spacing: 20) {
-                Image(systemName: "wind")
-                    .font(.system(size: 56, weight: .light))
-                    .foregroundStyle(.tint)
-                Text("Breath")
-                    .font(.title2.weight(.semibold))
-                Text("Guided breathing sessions will appear here.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 32)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .navigationTitle("Breath")
         }
     }
 }

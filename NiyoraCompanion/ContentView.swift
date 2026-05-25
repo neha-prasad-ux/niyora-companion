@@ -1,14 +1,10 @@
+#if NIYORA_V1_PPG_ENABLED
 import SwiftUI
 
 /// The primary screen of Niyora Companion. Two tabs:
 ///
-/// 1. Home: Three states:
-///    - No Mac paired yet: introduction + a single "Connect to Mac" button
-///      that opens the QR scanner.
-///    - At least one Mac paired: paired status, last received request, and
-///      a small footer about how measurements work.
-///    - Scanning: full-screen camera preview with a cancel chip.
-/// 2. My Soul: Tier progression, session history, and settings.
+/// 1. Pairing: Mac pairing flow + measurement status
+/// 2. Breath: All 14 breathing techniques + mindfulness moments
 ///
 /// When the Mac sends a `request_measurement` frame, `MeasurementSheet`
 /// presents over the whole view to drive a 30s PPG capture.
@@ -26,14 +22,14 @@ struct ContentView: View {
 
     var body: some View {
         TabView {
-            homeTab
+            pairingTab
                 .tabItem {
-                    Label("Home", systemImage: "house")
+                    Label("Connect", systemImage: "iphone.and.arrow.forward")
                 }
 
-            MySoulTabView(flow: $flow)
+            BreathTabView()
                 .tabItem {
-                    Label("My Soul", systemImage: "sparkles")
+                    Label("Breath", systemImage: "wind")
                 }
         }
         .fullScreenCover(isPresented: $showingScanner) {
@@ -68,7 +64,9 @@ struct ContentView: View {
         }
     }
 
-    private var homeTab: some View {
+    // MARK: - Pairing tab
+
+    private var pairingTab: some View {
         NavigationStack {
             mainContent
                 .navigationTitle("Niyora Companion")
@@ -189,7 +187,6 @@ struct ContentView: View {
                                 KeychainStore.deleteSecret(forServerId: server.serverId)
                                 KnownServerStore.remove(serverId: server.serverId)
                                 LocalMeasurementStore.clear()
-                                LocalSessionStore.clear()
                                 flow.disconnect()
                             }
                             .buttonStyle(.bordered)
@@ -334,3 +331,4 @@ struct ContentView: View {
 #Preview {
     ContentView()
 }
+#endif
