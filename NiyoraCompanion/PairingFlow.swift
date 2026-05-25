@@ -42,6 +42,13 @@ final class PairingFlow {
     /// that has not yet been resolved. ContentView watches this and
     /// presents `MeasurementSheet` when non-nil.
     var pendingRequest: PendingRequest?
+    /// Mac-side tier id (e.g. "glow") received in the hello frame.
+    /// Non-nil only while paired with a Mac that sends tier data.
+    /// MySoulTabView uses this to prefer Mac-side tier over local count.
+    var macTier: Tier?
+    /// Mac-side total session count from the hello frame, or nil when
+    /// the paired Mac is an older build that does not send it.
+    var macSessionCount: Int?
     /// session_id:phase keys already handled this connection, so a
     /// queue replay does not re-prompt the user for a capture they
     /// already produced. Reset on disconnect.
@@ -96,6 +103,8 @@ final class PairingFlow {
         connection = nil
         seenRequests.removeAll()
         pendingRequest = nil
+        macTier = nil
+        macSessionCount = nil
         Task { await conn?.cancel() }
         state = .idle
     }
@@ -226,6 +235,8 @@ final class PairingFlow {
         Task { await priorConnection?.cancel() }
         seenRequests.removeAll()
         pendingRequest = nil
+        macTier = nil
+        macSessionCount = nil
 
         guard let secret else {
             state = .failed(reason: pairingId == nil
@@ -299,8 +310,10 @@ final class PairingFlow {
                 return
             }
             switch msg {
-            case .hello:
+            case let .hello(_, _, tierStr, count):
                 receivedHello = true
+                macTier = tierStr.flatMap { str in Tier.allCases.first { $0.id == str } }
+                macSessionCount = count
             case .challenge(let nonceHex):
                 guard receivedHello else {
                     state = .failed(reason: "Mac sent challenge before hello.")

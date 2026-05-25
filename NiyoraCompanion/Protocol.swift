@@ -101,7 +101,10 @@ enum HrvResultStatus: String, Codable, Equatable {
 // MARK: - Mac → Client
 
 enum ServerMessage: Decodable, Equatable {
-    case hello(serverId: String, serverName: String)
+    /// `currentTier` and `totalSessionCount` are optional: older Mac
+    /// builds omit them; newer builds include them for paired-mode tier
+    /// display on the phone.
+    case hello(serverId: String, serverName: String, currentTier: String?, totalSessionCount: Int?)
     case challenge(nonceHex: String)
     case authed
     case authFailed(reason: String)
@@ -115,6 +118,8 @@ enum ServerMessage: Decodable, Equatable {
         case type
         case serverId = "server_id"
         case serverName = "server_name"
+        case currentTier = "current_tier"
+        case totalSessionCount = "total_session_count"
         case nonceHex = "nonce_hex"
         case reason
         case sessionId = "session_id"
@@ -129,7 +134,9 @@ enum ServerMessage: Decodable, Equatable {
         case "hello":
             self = .hello(
                 serverId: try c.decode(String.self, forKey: .serverId),
-                serverName: try c.decode(String.self, forKey: .serverName)
+                serverName: try c.decode(String.self, forKey: .serverName),
+                currentTier: try c.decodeIfPresent(String.self, forKey: .currentTier),
+                totalSessionCount: try c.decodeIfPresent(Int.self, forKey: .totalSessionCount)
             )
         case "challenge":
             self = .challenge(nonceHex: try c.decode(String.self, forKey: .nonceHex))

@@ -16,7 +16,6 @@ struct MySoulTabView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var sessions: [LocalSessionStore.Session] = []
-    @State private var currentTier: Tier = .spark
 
     var body: some View {
         ZStack {
@@ -87,7 +86,7 @@ struct MySoulTabView: View {
     private var tierOrb: some View {
         let core: CGFloat = 240
         let halo: CGFloat = core * 1.05
-        let accent = currentTier.color
+        let accent = effectiveTier.color
         return ZStack {
             // Soft outer halo in the tier accent
             Circle()
@@ -139,7 +138,7 @@ struct MySoulTabView: View {
     }
 
     private var ringCount: Int {
-        switch currentTier {
+        switch effectiveTier {
         case .spark:      return 0
         case .glow:       return 1
         case .shine:      return 2
@@ -152,16 +151,16 @@ struct MySoulTabView: View {
 
     private var tierLabel: some View {
         VStack(spacing: 8) {
-            Text(currentTier.name)
+            Text(effectiveTier.name)
                 .font(.system(size: 34, weight: .semibold))
-                .foregroundStyle(currentTier.color)
+                .foregroundStyle(effectiveTier.color)
 
-            Text("\(completedCount) session\(completedCount == 1 ? "" : "s")")
+            Text("\(effectiveSessionCount) session\(effectiveSessionCount == 1 ? "" : "s")")
                 .font(.system(size: 14, weight: .light))
                 .foregroundStyle(.white.opacity(0.5))
 
-            if let remaining = currentTier.sessionsToNext(currentCount: completedCount),
-               let next = Tier(rawValue: currentTier.rawValue + 1) {
+            if let remaining = effectiveTier.sessionsToNext(currentCount: effectiveSessionCount),
+               let next = Tier(rawValue: effectiveTier.rawValue + 1) {
                 Text("\(remaining) more to \(next.name)")
                     .font(.system(size: 13, weight: .light))
                     .foregroundStyle(.white.opacity(0.4))
@@ -172,18 +171,30 @@ struct MySoulTabView: View {
                     .foregroundStyle(.white.opacity(0.4))
                     .padding(.top, 6)
             }
+
+            Text(isSyncedFromMac ? "Synced from Mac" : "Local only")
+                .font(.system(size: 11, weight: .light))
+                .foregroundStyle(.white.opacity(0.3))
+                .padding(.top, 4)
         }
     }
 
-    private var completedCount: Int {
-        sessions.filter(\.completed).count
+    private var isSyncedFromMac: Bool {
+        flow.macTier != nil
+    }
+
+    private var effectiveSessionCount: Int {
+        flow.macSessionCount ?? sessions.filter(\.completed).count
+    }
+
+    private var effectiveTier: Tier {
+        flow.macTier ?? Tier.forSessionCount(effectiveSessionCount)
     }
 
     // MARK: - Data
 
     private func loadData() {
         sessions = LocalSessionStore.all()
-        currentTier = Tier.forSessionCount(completedCount)
     }
 }
 
