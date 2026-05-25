@@ -29,32 +29,29 @@ struct BreathHomeView: View {
     }
 
     var body: some View {
-        GeometryReader { geo in
-            ZStack {
-                backgroundGradient
-                    .ignoresSafeArea()
+        ZStack {
+            backgroundGradient
+                .ignoresSafeArea()
 
-                VStack(spacing: 0) {
-                    topBar
-                        .padding(.horizontal, 20)
-                        .padding(.top, 4)
+            VStack(spacing: 0) {
+                topBar
+                    .padding(.horizontal, 20)
+                    .padding(.top, 8)
 
-                    tagline
-                        .padding(.top, 6)
+                tagline
+                    .padding(.top, 6)
 
-                    Spacer(minLength: 0)
+                Spacer(minLength: 0)
 
-                    orb(maxSize: min(geo.size.width, geo.size.height) * 0.55)
+                orbView
 
-                    Spacer(minLength: 0)
+                Spacer(minLength: 0)
 
-                    techniqueText
-                        .padding(.bottom, 24)
+                techniqueText
+                    .padding(.bottom, 18)
 
-                    actions
-                        .padding(.horizontal, 24)
-                        .padding(.bottom, 24)
-                }
+                actions
+                    .padding(.horizontal, 24)
             }
         }
         .preferredColorScheme(.dark)
@@ -129,9 +126,9 @@ struct BreathHomeView: View {
 
     // MARK: - Orb
 
-    private func orb(maxSize: CGFloat) -> some View {
-        let core = max(180, min(maxSize, 260))
-        let halo = core * 1.25
+    private var orbView: some View {
+        let core: CGFloat = 240
+        let halo: CGFloat = core * 1.3
         return ZStack {
             // Outer halo
             Circle()
@@ -238,8 +235,9 @@ struct BreathHomeView: View {
                 rotateTechnique()
             } label: {
                 Text("Try a different one")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.7))
+                    .padding(.top, 4)
             }
             .buttonStyle(.plain)
         }
