@@ -65,7 +65,6 @@ Use `UIImpactFeedbackGenerator` only on iPhone (not iPad or other form factors):
 guard UIDevice.current.userInterfaceIdiom == .phone else { return }
 ```
 
-**Existing violations**: `BreathSessionView.swift:319` and `MeasurementController.swift:60` call `UIImpactFeedbackGenerator` without this guard. Do not copy these patterns; they are known gaps.
 
 ## Binary assets
 

@@ -314,6 +314,7 @@ private class SessionController: ObservableObject {
     }
 
     private func fireHaptic(for phaseType: BreathPhase.PhaseType) {
+        guard UIDevice.current.userInterfaceIdiom == .phone else { return }
         switch phaseType {
         case .inhale, .exhale:
             let impact = UIImpactFeedbackGenerator(style: .medium)

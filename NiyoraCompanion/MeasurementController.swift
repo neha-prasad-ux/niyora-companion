@@ -85,7 +85,7 @@ final class MeasurementController {
         }
         state = .placingFinger
         UIApplication.shared.isIdleTimerDisabled = true
-        haptics.prepare()
+        if UIDevice.current.userInterfaceIdiom == .phone { haptics.prepare() }
         successHaptic.prepare()
         scheduleTick()
     }
@@ -128,7 +128,7 @@ final class MeasurementController {
         case .placingFinger:
             // Transition to readyCountdown when a finger is detected.
             if fingerOnLens {
-                haptics.impactOccurred()
+                if UIDevice.current.userInterfaceIdiom == .phone { haptics.impactOccurred() }
                 state = .readyCountdown(remaining: Self.readyCountdownSec)
             }
         case .readyCountdown(let remaining):
@@ -202,7 +202,7 @@ final class MeasurementController {
             if next <= 0 {
                 state = .capturing(elapsed: 0)
                 captureStartedAt = Date()
-                haptics.impactOccurred()
+                if UIDevice.current.userInterfaceIdiom == .phone { haptics.impactOccurred() }
             } else {
                 state = .readyCountdown(remaining: next)
             }
