@@ -5,7 +5,7 @@ platform :ios do
   lane :beta do
     sh("cd .. && xcodegen generate")
     increment_build_number(
-      build_number: latest_testflight_build_number(version: get_version_number) + 1
+      build_number: latest_testflight_build_number(version: get_version_number, initial_build_number: 1) + 1
     )
     match(type: "appstore")
     build_app(
@@ -27,7 +27,7 @@ platform :ios do
   lane :release do
     sh("cd .. && xcodegen generate")
     increment_build_number(
-      build_number: latest_testflight_build_number(version: get_version_number) + 1
+      build_number: latest_testflight_build_number(version: get_version_number, initial_build_number: 1) + 1
     )
     match(type: "appstore")
     build_app(
