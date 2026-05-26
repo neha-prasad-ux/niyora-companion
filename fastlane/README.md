@@ -10,10 +10,22 @@
 
 2. **Set environment variables**
 
+   Both `beta` and `release` lanes call `latest_testflight_build_number` and
+   `upload_to_testflight`, which require authenticated App Store Connect access.
+   Use an App Store Connect API key (recommended for CI -- no 2FA prompt):
+
    ```sh
+   export ASC_KEY_ID="XXXXXXXXXX"          # Key ID from App Store Connect
+   export ASC_ISSUER_ID="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"  # Issuer ID
+   export ASC_KEY_CONTENT="$(base64 -i AuthKey_XXXXXXXXXX.p8)"  # base64-encoded .p8
    export FASTLANE_APPLE_ID="you@example.com"
    export FASTLANE_TEAM_ID="XXXXXXXXXX"   # 10-char Apple Developer team ID
    ```
+
+   To generate an API key: App Store Connect -> Users and Access -> Integrations ->
+   App Store Connect API -> generate a key with App Manager role. Download the `.p8`
+   once (it cannot be re-downloaded). The Key ID and Issuer ID are shown on the same
+   page.
 
    Find your team ID at developer.apple.com/account/#!/membership.
 
