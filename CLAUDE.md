@@ -55,6 +55,8 @@ The `print()` migration is tracked in neha-prasad-ux/niyora-companion#17.
 
 Set `AVAudioSession` category to `.ambient` so Silent Mode mutes the app. Do not set `.playback`; that overrides the mute switch and is the wrong choice for a stress-relief tool.
 
+**Existing violation**: `BreathSessionView.swift:329` currently uses `.playback`. This is a known bug; do not copy the pattern.
+
 ## Haptics
 
 Use `UIImpactFeedbackGenerator` only on iPhone (not iPad or other form factors):
@@ -62,6 +64,8 @@ Use `UIImpactFeedbackGenerator` only on iPhone (not iPad or other form factors):
 ```swift
 guard UIDevice.current.userInterfaceIdiom == .phone else { return }
 ```
+
+**Existing violations**: `BreathSessionView.swift:319` and `MeasurementController.swift:60` call `UIImpactFeedbackGenerator` without this guard. Do not copy these patterns; they are known gaps.
 
 ## Binary assets
 
@@ -90,7 +94,7 @@ These are on top of the shared rules in the Mac repo's CLAUDE.md.
 - **`Tiers.swift` hue and saturation values must match `niyora/src/tiers.ts`.** They are cross-repo canonical. If you change one, change all three files (Mac, iOS, web orb). See DESIGN.md for the table.
 - **`Protocol.swift` `protocolVersion` is currently `v2`.** Old Macs on `v1` will fail the handshake. Do not bump the version without updating the Mac side.
 - **`HRVSpikeView.swift` must not appear in Release builds.** It is gated by `#if DEBUG`. Do not remove that gate.
-- **The local-network entitlement in `NiyoraCompanion.entitlements` is required for Bonjour.** Removing it breaks Mac discovery.
+- **The `NSLocalNetworkUsageDescription` key in `project.yml` is required for Bonjour.** It lives under `INFOPLIST_KEY_NSLocalNetworkUsageDescription` in `project.yml`, not in `NiyoraCompanion.entitlements` (that file holds only HealthKit keys). Removing the key from `project.yml` breaks Mac discovery.
 - **`AVAudioSession` category must stay `.ambient`.** Changing it to `.playback` overrides the mute switch.
 - **Haptic calls need the iPhone idiom guard.** `UIImpactFeedbackGenerator` on iPad logs a warning and may behave unexpectedly. Always guard.
 

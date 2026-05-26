@@ -32,6 +32,7 @@ Merged on `main`, no release decision yet.
 | 40 | My Soul + home bottom padding | Orb fills full iPhone screen; My Soul gradient matches Niyora brand; safe-area padding applied. |
 | 38 | CFBundleDisplayName set to "Niyora" | App label on home screen and Spotlight shows "Niyora," not "NiyoraCompanion." |
 | 33 | Orb constrained to 240pt + safe-area clearance | Consistent with brand proportions; bottom nav bar no longer overlaps the orb. |
+| 32 | Home view fills full iPhone screen | Removed middle-band layout; view now occupies the full screen height. |
 
 ## Next update
 
