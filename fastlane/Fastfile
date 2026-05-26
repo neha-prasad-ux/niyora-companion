@@ -3,10 +3,10 @@ default_platform(:ios)
 platform :ios do
   desc "Build + upload beta to TestFlight"
   lane :beta do
+    sh("cd .. && xcodegen generate")
     increment_build_number(
       build_number: latest_testflight_build_number(version: get_version_number) + 1
     )
-    sh("cd .. && xcodegen generate")
     build_app(
       project: "NiyoraCompanion.xcodeproj",
       scheme: "NiyoraCompanion",
@@ -24,10 +24,10 @@ platform :ios do
 
   desc "Build + upload release to App Store Connect (manual review submission)"
   lane :release do
+    sh("cd .. && xcodegen generate")
     increment_build_number(
       build_number: latest_testflight_build_number(version: get_version_number) + 1
     )
-    sh("cd .. && xcodegen generate")
     build_app(
       project: "NiyoraCompanion.xcodeproj",
       scheme: "NiyoraCompanion",
