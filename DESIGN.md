@@ -71,6 +71,12 @@ Seven non-breathing moments grounded in CBT, self-compassion, and grounding rese
 
 All 14 practices share the same `Technique` type hierarchy in `Techniques.swift`. Names, phase timings, and tier assignments are canonical and must match the Mac app.
 
+## Audio
+
+Set `AVAudioSession` category to `.ambient` so Silent Mode mutes the app. Do not use `.playback`; it overrides the mute switch and is the wrong choice for a stress-relief tool.
+
+**Existing violation**: `BreathSessionView.swift:329` currently uses `.playback`. This is a known bug. Do not copy the pattern.
+
 ## Haptic design
 
 Haptics reinforce the breath phases on iPhone only (guard with `UIDevice.current.userInterfaceIdiom == .phone`):
