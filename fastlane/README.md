@@ -17,14 +17,28 @@
 
    Find your team ID at developer.apple.com/account/#!/membership.
 
-3. **Set up signing certificates**
+3. **Set your Apple Developer team ID**
+
+   Open `project.yml` and replace `XXXXXXXXXX` on the `DEVELOPMENT_TEAM` line with
+   your 10-character team ID (find it at developer.apple.com/account/#!/membership).
+
+4. **Set up signing certificates**
 
    ```sh
    bundle exec fastlane match init
    ```
 
    Choose `git` (recommended) or `appstore` (API key) as the storage backend.
-   Follow the prompts to create or import certificates and provisioning profiles.
+   Follow the prompts to configure the storage location.
+
+   Then fetch (or create) the distribution certificates and profiles:
+
+   ```sh
+   bundle exec fastlane match appstore
+   ```
+
+   You must run this before either lane; `match init` alone does not download
+   certificates to the local Keychain.
 
 ## Shipping a beta
 
