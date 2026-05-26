@@ -19,7 +19,8 @@
    export ASC_ISSUER_ID="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"  # Issuer ID
    export ASC_KEY_CONTENT="$(base64 -i AuthKey_XXXXXXXXXX.p8)"  # base64-encoded .p8
    export FASTLANE_APPLE_ID="you@example.com"
-   export FASTLANE_TEAM_ID="XXXXXXXXXX"   # 10-char Apple Developer team ID
+   export FASTLANE_TEAM_ID="XXXXXXXXXX"   # App Store Connect team ID (Appfile)
+   export APPLE_TEAM_ID="XXXXXXXXXX"      # 10-char Apple Developer team ID (Xcode code signing)
    ```
 
    To generate an API key: App Store Connect -> Users and Access -> Integrations ->
@@ -29,19 +30,13 @@
 
    Find your team ID at developer.apple.com/account/#!/membership.
 
-3. **Set your Apple Developer team ID**
-
-   Open `project.yml` and replace `XXXXXXXXXX` on the `DEVELOPMENT_TEAM` line with
-   your 10-character team ID (find it at developer.apple.com/account/#!/membership).
-
-4. **Set up signing certificates**
+3. **Set up signing certificates**
 
    `fastlane/Matchfile` is committed and configured for git storage. Export the
    certificates repository URL before running match:
 
    ```sh
    export MATCH_GIT_URL="git@github.com:your-org/niyora-certs.git"
-   export APPLE_ID="you@example.com"
    ```
 
    Fetch (or create) the distribution certificates and profiles:

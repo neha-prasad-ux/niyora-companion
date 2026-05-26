@@ -2,4 +2,4 @@ storage_mode("git")
 git_url(ENV["MATCH_GIT_URL"])
 
 app_identifier(["com.niyora.companion"])
-username(ENV["APPLE_ID"])
+username(ENV["FASTLANE_APPLE_ID"])
