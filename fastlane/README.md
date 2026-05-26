@@ -36,21 +36,22 @@
 
 4. **Set up signing certificates**
 
+   `fastlane/Matchfile` is committed and configured for git storage. Export the
+   certificates repository URL before running match:
+
    ```sh
-   bundle exec fastlane match init
+   export MATCH_GIT_URL="git@github.com:your-org/niyora-certs.git"
+   export APPLE_ID="you@example.com"
    ```
 
-   Choose `git` (recommended) or `appstore` (API key) as the storage backend.
-   Follow the prompts to configure the storage location.
-
-   Then fetch (or create) the distribution certificates and profiles:
+   Fetch (or create) the distribution certificates and profiles:
 
    ```sh
    bundle exec fastlane match appstore
    ```
 
-   You must run this before either lane; `match init` alone does not download
-   certificates to the local Keychain.
+   You must run this before either lane. `match appstore` clones the certs repo
+   and installs certificates and profiles into the local Keychain.
 
 ## Shipping a beta
 
