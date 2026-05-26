@@ -47,6 +47,6 @@ targets:
         CODE_SIGN_ENTITLEMENTS: NiyoraCompanion/NiyoraCompanion.entitlements
         CODE_SIGN_STYLE: Automatic
         TARGETED_DEVICE_FAMILY: "1"
-        # Replace XXXXXXXXXX with your 10-character Apple Developer team ID
-        # (Xcode > Settings > Accounts, or developer.apple.com/account/#!/membership).
-        DEVELOPMENT_TEAM: XXXXXXXXXX
+        # Set DEVELOPMENT_TEAM via your Apple Developer account:
+        # Xcode > Settings > Accounts, or developer.apple.com/account/#!/membership.
+        # DEVELOPMENT_TEAM: XXXXXXXXXX
