@@ -310,8 +310,8 @@ private struct RemindersStep: View {
                     }
                     Task {
                         await ReminderScheduler.shared.schedule(times: comps)
+                        onDone()
                     }
-                    onDone()
                 }
                 .padding(.horizontal, 24)
                 .padding(.bottom, 48)
