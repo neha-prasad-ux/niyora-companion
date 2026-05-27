@@ -234,10 +234,11 @@ private class SessionController: ObservableObject {
         self.technique = technique
         startTime = CACurrentMediaTime()
 
-        // Start audio if not Random
-        if audioTrack != .random {
-            playAudio(track: audioTrack)
-        }
+        // Start audio; if Random, pick one of the bundled tracks at random
+        let resolvedTrack: AudioTrack = audioTrack == .random
+            ? ([.serene, .ocean, .forest].randomElement() ?? .serene)
+            : audioTrack
+        playAudio(track: resolvedTrack)
 
         // Start animation loop
         displayLink = CADisplayLink(target: self, selector: #selector(tick))
@@ -249,6 +250,7 @@ private class SessionController: ObservableObject {
         displayLink = nil
         audioPlayer?.stop()
         audioPlayer = nil
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
     @objc private func tick() {
@@ -326,7 +328,7 @@ private class SessionController: ObservableObject {
     private func playAudio(track: AudioTrack) {
         guard let url = track.url else { return }
         do {
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+            try AVAudioSession.sharedInstance().setCategory(.ambient, mode: .default)
             try AVAudioSession.sharedInstance().setActive(true)
             audioPlayer = try AVAudioPlayer(contentsOf: url)
             audioPlayer?.numberOfLoops = -1
