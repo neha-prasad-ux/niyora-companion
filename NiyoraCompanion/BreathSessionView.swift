@@ -234,10 +234,11 @@ private class SessionController: ObservableObject {
         self.technique = technique
         startTime = CACurrentMediaTime()
 
-        // Start audio if not Random
-        if audioTrack != .random {
-            playAudio(track: audioTrack)
-        }
+        // Start audio; if Random, pick one of the bundled tracks at random
+        let resolvedTrack: AudioTrack = audioTrack == .random
+            ? ([.serene, .ocean, .forest].randomElement() ?? .serene)
+            : audioTrack
+        playAudio(track: resolvedTrack)
 
         // Start animation loop
         displayLink = CADisplayLink(target: self, selector: #selector(tick))
