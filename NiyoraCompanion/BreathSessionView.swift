@@ -250,6 +250,7 @@ private class SessionController: ObservableObject {
         displayLink = nil
         audioPlayer?.stop()
         audioPlayer = nil
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
     @objc private func tick() {
