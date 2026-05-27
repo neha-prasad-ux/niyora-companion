@@ -122,7 +122,7 @@ final class MeasurementController {
         }
         fingerOnLens = processor.fingerLikelyOnLens()
         if case .placingFinger = state, processor.samples.count % 15 == 0 {
-            log.debug("frame · green=\(String(format: "%.1f", green)) red=\(String(format: "%.1f", red)) ratio=\(green > 0 ? String(format: "%.2f", red / green) : "n/a") fingerOnLens=\(fingerOnLens)")
+            log.debug("frame · green=\(String(format: "%.1f", green), privacy: .public) red=\(String(format: "%.1f", red), privacy: .public) ratio=\(green > 0 ? String(format: "%.2f", red / green) : "n/a", privacy: .public) fingerOnLens=\(fingerOnLens, privacy: .public)")
         }
 
         switch state {

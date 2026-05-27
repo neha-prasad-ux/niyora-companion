@@ -63,7 +63,7 @@ final class PPGCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
             queue: .main
         ) { note in
             let rawReason = note.userInfo?[AVCaptureSessionInterruptionReasonKey] as? Int ?? -1
-            log.info("session WAS INTERRUPTED · reason=\(rawReason) (\(Self.interruptionReasonName(rawReason)))")
+            log.info("session WAS INTERRUPTED · reason=\(rawReason, privacy: .public) (\(Self.interruptionReasonName(rawReason), privacy: .public))")
         })
         observers.append(nc.addObserver(
             forName: AVCaptureSession.interruptionEndedNotification,
@@ -78,7 +78,7 @@ final class PPGCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
             queue: .main
         ) { note in
             let err = note.userInfo?[AVCaptureSessionErrorKey]
-            log.error("session RUNTIME ERROR · \(String(describing: err))")
+            log.error("session RUNTIME ERROR · \(String(describing: err), privacy: .public)")
         })
     }
 
@@ -179,7 +179,7 @@ final class PPGCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         // Each attempt verifies that iOS actually activated the LED
         // and retries if not. Falls back to .on (max level) if the
         // level-based API fails outright.
-        log.debug("pre-torch · hasTorch=\(dev.hasTorch) isTorchAvailable=\(dev.isTorchAvailable) supportsOn=\(dev.isTorchModeSupported(.on)) isTorchActive=\(dev.isTorchActive)")
+        log.debug("pre-torch · hasTorch=\(dev.hasTorch, privacy: .public) isTorchAvailable=\(dev.isTorchAvailable, privacy: .public) supportsOn=\(dev.isTorchModeSupported(.on), privacy: .public) isTorchActive=\(dev.isTorchActive, privacy: .public)")
         var torchActivated = false
         for attempt in 0..<3 {
             do {
@@ -204,10 +204,10 @@ final class PPGCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
             }
             if dev.isTorchActive {
                 torchActivated = true
-                log.info("post-torch · attempt=\(attempt) torchMode=\(dev.torchMode.rawValue) isTorchActive=true torchLevel=\(dev.torchLevel)")
+                log.info("post-torch · attempt=\(attempt, privacy: .public) torchMode=\(dev.torchMode.rawValue, privacy: .public) isTorchActive=true torchLevel=\(dev.torchLevel, privacy: .public)")
                 break
             }
-            log.error("post-torch · attempt=\(attempt) torchMode=\(dev.torchMode.rawValue) isTorchActive=false torchLevel=\(dev.torchLevel) · retrying")
+            log.warning("post-torch · attempt=\(attempt, privacy: .public) torchMode=\(dev.torchMode.rawValue, privacy: .public) isTorchActive=false torchLevel=\(dev.torchLevel, privacy: .public) · retrying")
         }
         if !torchActivated {
             throw StartError.configurationFailed("The flashlight would not turn on. Close other apps that might be using the camera, then try again.")
@@ -249,7 +249,7 @@ final class PPGCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
                 }
             }
             dev.unlockForConfiguration()
-            log.info("torch re-armed · isTorchActive=\(dev.isTorchActive) torchLevel=\(dev.torchLevel)")
+            log.info("torch re-armed · isTorchActive=\(dev.isTorchActive, privacy: .public) torchLevel=\(dev.torchLevel, privacy: .public)")
         } catch {
             // Best-effort. If we can't lock, try again on the next tick.
         }

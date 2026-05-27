@@ -103,7 +103,7 @@ struct PPGSignalProcessor {
             )
         }
         guard samples.count >= Int(Self.sampleRateHz * 5) else {
-            log.info("result=lowSignal · only \(samples.count) samples (<5s worth)")
+            log.info("result=lowSignal · only \(samples.count, privacy: .public) samples (<5s worth)")
             return PPGMeasurementResult(
                 rmssdMs: nil, sdnnMs: nil,
                 sampleCount: 0, snrDb: nil,
@@ -126,10 +126,10 @@ struct PPGSignalProcessor {
         let rmssdValue = rmssd(ibisMs) ?? 0
         let sdnnValue = sdnn(ibisMs) ?? 0
 
-        log.debug("samples=\(samples.count) peaks=\(peaks.count) ibis=\(ibisMs.count)/\(rawIbisMs.count) snrDb=\(String(format: "%.2f", snr)) hrBpm=\(String(format: "%.1f", heartRateBpm)) rmssdMs=\(String(format: "%.1f", rmssdValue)) sdnnMs=\(String(format: "%.1f", sdnnValue))")
+        log.debug("samples=\(samples.count, privacy: .public) peaks=\(peaks.count, privacy: .public) ibis=\(ibisMs.count, privacy: .public)/\(rawIbisMs.count, privacy: .public) snrDb=\(String(format: "%.2f", snr), privacy: .public) hrBpm=\(String(format: "%.1f", heartRateBpm), privacy: .public) rmssdMs=\(String(format: "%.1f", rmssdValue), privacy: .public) sdnnMs=\(String(format: "%.1f", sdnnValue), privacy: .public)")
 
         guard ibisMs.count >= Self.minIbiCount else {
-            log.info("result=lowSignal · too few IBIs (\(ibisMs.count) < \(Self.minIbiCount))")
+            log.info("result=lowSignal · too few IBIs (\(ibisMs.count, privacy: .public) < \(Self.minIbiCount, privacy: .public))")
             return PPGMeasurementResult(
                 rmssdMs: nil, sdnnMs: nil,
                 sampleCount: UInt32(ibisMs.count),
@@ -138,7 +138,7 @@ struct PPGSignalProcessor {
             )
         }
         guard snr >= Self.minSnrDb else {
-            log.info("result=lowSignal · SNR \(String(format: "%.2f", snr)) < \(Self.minSnrDb)")
+            log.info("result=lowSignal · SNR \(String(format: "%.2f", snr), privacy: .public) < \(Self.minSnrDb, privacy: .public)")
             return PPGMeasurementResult(
                 rmssdMs: nil, sdnnMs: nil,
                 sampleCount: UInt32(ibisMs.count),
@@ -155,7 +155,7 @@ struct PPGSignalProcessor {
         let humanLikelyHr = heartRateBpm >= 40 && heartRateBpm <= 180
         let humanLikelyRmssd = rmssdValue >= 5 && rmssdValue <= 250
         guard humanLikelyHr, humanLikelyRmssd else {
-            log.info("result=lowSignal · HR \(String(format: "%.1f", heartRateBpm)) or RMSSD \(String(format: "%.1f", rmssdValue)) outside physiologic range")
+            log.info("result=lowSignal · HR \(String(format: "%.1f", heartRateBpm), privacy: .public) or RMSSD \(String(format: "%.1f", rmssdValue), privacy: .public) outside physiologic range")
             return PPGMeasurementResult(
                 rmssdMs: nil, sdnnMs: nil,
                 sampleCount: UInt32(ibisMs.count),

@@ -335,7 +335,7 @@ private class SessionController: ObservableObject {
             audioPlayer?.numberOfLoops = -1
             audioPlayer?.play()
         } catch {
-            log.error("audio playback failed: \(error.localizedDescription)")
+            log.error("audio playback failed: \(error, privacy: .public)")
         }
     }
 }
