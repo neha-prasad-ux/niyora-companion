@@ -1,9 +1,12 @@
 import Foundation
 import SwiftUI
 
+// Tier colours match neha-prasad-ux/niyora src/tiers.ts (canonical).
+// Update both atomically if these change.
+
 /// Soul tier progression for My Soul. Each tier unlocks a new set of
 /// breathing techniques. Cases, thresholds, and hue/saturation are the
-/// canonical values from `niyora/app/src/tiers.ts` and `DESIGN.md`.
+/// canonical values from `neha-prasad-ux/niyora src/tiers.ts` and `DESIGN.md`.
 /// Must stay in sync across repos (Mac / web orb / iOS).
 enum Tier: Int, CaseIterable {
     case spark = 0
